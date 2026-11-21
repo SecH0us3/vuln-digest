@@ -67,7 +67,8 @@ class VulnFeedTest(unittest.TestCase):
     def test_bootstrap_since(self):
         out = self.fetch("--since", "2026-11-19")
         # nginx2root has an update dated 11-19, java4shell and old are older, KEV 11-10 is older
-        self.assertEqual(self.keys(out), {"zerowire:nginx2root": "updated"})
+        # the user never saw nginx2root: it is new to them, with only the update inside the window
+        self.assertEqual(self.keys(out), {"zerowire:nginx2root": "new"})
         self.assertEqual([u["text"] for u in out["items"][0]["new_updates"]],
                          ["F5 says ASLR bypass is needed"])
 
@@ -162,6 +163,43 @@ class VulnFeedTest(unittest.TestCase):
         self.assertIn("CVE-2026-123007", rows[0]["cves"])
         later = json.loads(self.run_tool("history", "--days", "7", today="2026-12-20").stdout)
         self.assertEqual(later, [])
+
+    def test_truncated_feed_keeps_complete_items(self):
+        with open(self.zw) as f:
+            s = f.read()
+        cut = s.index("<title>Old item")  # the feed ends in the middle of the third item
+        with open(self.zw, "w") as f:
+            f.write(s[:cut + 20])
+        out = self.fetch("--all")
+        self.assertEqual(set(self.keys(out)) - {"kev:CVE-2026-109618"},
+                         {"zerowire:nginx2root", "zerowire:java4shell"})
+        partial = [e for e in out["errors"] if e["source"] == "zerowire"]
+        self.assertEqual(len(partial), 1)
+        self.assertTrue(partial[0]["partial"])
+
+    def test_vendor_feeds_rss_and_atom(self):
+        rss = os.path.join(self.dir, "node.xml")
+        atom = os.path.join(self.dir, "dotnet.xml")
+        with open(rss, "w") as f:
+            f.write("<rss><channel><item><title>November 2026 security releases</title>"
+                    "<link>https://nodejs.org/en/blog/vulnerability/november-2026-security-releases</link>"
+                    "<pubDate>Wed, 11 Nov 2026 00:00:00 GMT</pubDate>"
+                    "<description>Fixes CVE-2026-123864 and CVE-2026-123863</description></item></channel></rss>")
+        with open(atom, "w") as f:
+            f.write('<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>ASP.NET Core security updates</title>'
+                    '<link href="https://github.com/dotnet/announcements/issues/504"/><id>tag:504</id>'
+                    "<updated>2026-11-10T16:10:00Z</updated><content>CVE-2026-114146</content></entry></feed>")
+        feeds = os.path.join(self.dir, "feeds.txt")
+        with open(feeds, "w") as f:
+            f.write(f"node|file://{rss}\ndotnet|file://{atom}\n# comment\nbroken|file:///nonexistent\n")
+        out = self.fetch("--since", "2026-11-11", "--sources", "feeds", "--feeds", feeds)
+        self.assertEqual(self.keys(out), {
+            "feed:node:https://nodejs.org/en/blog/vulnerability/november-2026-security-releases": "new"})
+        self.assertEqual(out["items"][0]["cves"], ["CVE-2026-123863", "CVE-2026-123864"])
+        self.assertEqual([e["source"] for e in out["errors"]], ["feeds:broken"])
+        allout = self.fetch("--all", "--sources", "feeds", "--feeds", feeds)
+        dotnet = next(i for i in allout["items"] if i["source"] == "feeds:dotnet")
+        self.assertEqual((dotnet["date"], dotnet["link"]), ("2026-11-10", "https://github.com/dotnet/announcements/issues/504"))
 
     def test_osv_items(self):
         p = self.run_tool("fetch", "--all", "--sources", "osv", "--osv-file", os.path.join(FIX, "osv.json"))

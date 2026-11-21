@@ -57,7 +57,7 @@ Ask all the questions in one message. Give a default for each one, so the user c
 | 8 | **Do you want an urgent alert?** A separate message outside the schedule when an item in focus is exploited in the wild or has a public exploit | The most important case should not wait for the next morning | yes, if the platform can run often enough (step 4) |
 | 9 | **Where should the digest go?** This chat, email, Slack, Telegram, Microsoft Teams, a file in a folder or repository, a GitHub issue | Step 5 | this chat, or wherever this platform delivers the result of a scheduled job |
 | 10 | **Language and length?** Short (a table and one line per item) or detailed (a section per item in focus) | The format | the language of this conversation, detailed for items in focus, one line for the rest |
-| 11 | **Which sources?** See the "Sources" section. Offer the defaults and name the optional ones that fit the stack | More sources find more, but cost more time and tokens per run | Cloudflare Radar Zero Wire and the CISA KEV catalog, plus OSV if the user gave a repository or an SBOM in question 2. Tell the user that an OSV query sends package names and versions to osv.dev |
+| 11 | **Which sources?** See the "Sources" section. Offer the defaults and name the optional ones that fit the stack | More sources find more, but cost more time and tokens per run | Cloudflare Radar Zero Wire and the CISA KEV catalog, plus the official security feed of each product in focus that has one, plus OSV if the user gave a repository or an SBOM in question 2. Tell the user that an OSV query sends package names and versions to osv.dev |
 | 12 | **How far back should the first digest look?** | The first run has no state | 7 days |
 | 13 | **What is exposed to the internet?** Which of the products from question 1 are reachable from outside | The same vulnerability is urgent on an internet-facing proxy and can wait on a laptop | not known: treat servers and network equipment as exposed |
 
@@ -220,15 +220,17 @@ With the helper script (see "Helper script"):
 
 ```sh
 python3 -I vuln_feed.py fetch --sources zerowire,kev --epss
-# with a packages file:
-python3 -I vuln_feed.py fetch --sources zerowire,kev,osv --packages packages.txt --epss
+# with vendor feeds and a packages file:
+python3 -I vuln_feed.py fetch --sources zerowire,kev,feeds,osv --feeds feeds.txt --packages packages.txt --epss
 ```
 
-The output is JSON: `items` (only new and updated items, each with `status` new or updated and `new_updates`), `errors` (sources that failed) and `last_digest`. The script saves the same items into `last_run.json`
+Zero Wire and KEV cover only a few of the most important vulnerabilities each week. A product in focus that ships regular security releases (a runtime, a framework, a web server) needs its own feed, or its releases never reach the digest. At setup, find the official security feed (RSS or Atom) of each product in focus, check it in the vendor's documentation, and list it in `feeds.txt` as `name|url`. If a product has no feed, read its security page on each run by hand and give its entries keys of the form `page:<name>:<url>`
+
+The output is JSON: `items` (only new and updated items, each with `status` new or updated and `new_updates`), `errors` (sources that failed, and `"partial": true` for a source that was read only in part, for example a feed cut off in transfer) and `last_digest`. The script saves the same items into `last_run.json`
 
 Without the script, do the same by hand: fetch each source, give each item a key (`zerowire:<slug>`, `kev:<CVE>`, `osv:<ID>`), and compare its updates with the state. An update is identified by its date and text, not by a guid, a "last reviewed" date or a modification time, because those change without news
 
-If the platform cannot reach a source directly (a proxy refuses it), use the platform's web fetch tool. Long feeds may need to be read in parts
+If the platform cannot reach a source directly (a proxy refuses it), use the platform's web fetch tool. Long feeds may need to be read in parts. Some fetch tools return a summary instead of the page: then an update's text is not stable between runs, so identify updates by item key and update date only, and ask the tool for dates, CVE ids and versions exactly as written
 
 ### R3. Match the items to the profile
 
@@ -247,6 +249,8 @@ Give each item one of four levels. Base it on facts from the sources:
 - **high** - in focus, and critical or high severity, or exploited but not exposed;
 - **normal** - in focus, medium severity, or a non-default configuration is needed;
 - **info** - outside the stack, or low severity
+
+`kev_cves` in the script output lists every CVE the item mentions that is in KEV. A briefing often mentions an older, exploited CVE as background: call the item exploited only if a CVE in `kev_cves` is one of the item's own vulnerabilities
 
 EPSS is a probability of exploitation in the next 30 days. Show it as a percent next to the CVE when it is known, and use a high EPSS to move an item up one level, never down
 
@@ -335,6 +339,10 @@ Rules for the format:
 - if `length` is short, keep only the table, the main thing and the footer;
 - every item has a link to its source
 
+### First digest
+
+The first digest covers the lookback (question 12). A user who just set up the digest also wants to know what is still open in their stack from shortly before. Add a section "Before this digest": items in focus from the 30 days before the lookback, one line each, with the fixed version. Get them with `fetch --all` (it does not touch the state) and filter by date. They are not in the snapshot, so `mark` leaves them alone: the `--since` rebuild already counts them as seen, and they come back only with a new update
+
 ### Day with nothing new
 
 If `quiet_day` is `one_line`, send one line: "Nothing new for your stack since <date of the last digest>. Sources checked: <list>". If it is `silent`, send nothing, but still run `mark` and save the state
@@ -385,7 +393,7 @@ The sources marked "on" are used unless the user says otherwise. The others are 
 | [GitHub Advisory Database](https://github.com/advisories) | reviewed advisories for packages | API, a token raises the limits | optional |
 | [FIRST EPSS](https://www.first.org/epss/) | the probability that a CVE is exploited in the next 30 days | public API, no key | on, as enrichment |
 | [NVD](https://nvd.nist.gov/) | CVE details and CVSS scores | public API, a key raises the limits | optional, for details only |
-| vendor advisories | security bulletins of the vendors in the user's stack (operating systems, browsers, network equipment, cloud providers) | usually RSS or a web page | optional: offer the ones that fit the stack |
+| vendor advisories | security bulletins of the products in focus (runtimes, frameworks, web servers, operating systems, browsers, network equipment, cloud providers) | usually RSS or Atom (the `feeds` source), sometimes only a web page | on for each product in focus that has one |
 
 Do not fetch more than needed: one fetch of each source per run is enough. Use the source's own API limits, and send a User-Agent that names this tool
 
@@ -400,7 +408,8 @@ Do not fetch more than needed: one fetch of each source per run is enough. Use t
 | `fetch --all` | a preview of everything the sources hold now. The state is not read or changed |
 | `mark` | marks exactly the items from `last_run.json` as delivered |
 | `history --days 28` | the items delivered in the last N days, newest first: key, title, link, CVEs, last update |
-| `--sources zerowire,kev,osv` | which sources to use |
+| `--sources zerowire,kev,feeds,osv` | which sources to use |
+| `--feeds FILE` | vendor RSS or Atom feeds, one `name\|url` per line. Each entry is one item |
 | `--packages FILE` | the packages file for OSV |
 | `--epss` | adds EPSS scores |
 | `--kev-max-age 30` | KEV entries older than N days are not news (the catalog has more than a thousand). They still mark items of other sources as exploited |

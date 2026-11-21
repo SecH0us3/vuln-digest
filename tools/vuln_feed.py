@@ -8,6 +8,7 @@ Sources:
   zerowire  Cloudflare Radar Zero Wire briefings (RSS)
   kev       CISA Known Exploited Vulnerabilities catalog (JSON)
   osv       OSV.dev advisories for the packages listed in --packages
+  feeds     any RSS or Atom feeds listed in --feeds (vendor security bulletins)
 
 How repeats are avoided:
   every item has a key (zerowire:<slug>, kev:<CVE>, osv:<ID>) and a list of
@@ -98,10 +99,30 @@ def zerowire_updates(content):
     return out
 
 
-def parse_zerowire(raw):
-    root = ET.fromstring(raw)
+def rss_items(raw):
+    """<item> elements of an RSS feed. A feed cut off in transfer still gives its complete items"""
+    try:
+        return list(ET.fromstring(raw).iter("item")), None
+    except ET.ParseError as e:
+        text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+        ns = " ".join(re.findall(r'xmlns:\w+="[^"]*"', text[:2000]))
+        items = []
+        for block in re.findall(r"<item\b.*?</item>", text, re.S):
+            try:
+                items.append(ET.fromstring(f"<rss {ns}>{block}</rss>").find("item"))
+            except ET.ParseError:
+                continue
+        if not items:
+            raise
+        return items, f"feed is not well-formed ({e}); {len(items)} complete item(s) were read, the rest is skipped"
+
+
+def parse_zerowire(raw, warnings=None):
+    elements, warning = rss_items(raw)
+    if warning and warnings is not None:
+        warnings.append(warning)
     items = []
-    for it in root.iter("item"):
+    for it in elements:
         guid = it.findtext("guid") or it.findtext("link") or ""
         desc = it.findtext("description") or ""
         content = it.findtext("content:encoded", namespaces=NS) or ""
@@ -122,6 +143,68 @@ def parse_zerowire(raw):
             "cves": sorted(set(CVE_RE.findall(content + desc))),
             "updates": updates,
             "text": strip_html(content)[:8000],
+        })
+    return items
+
+
+# ---------- vendor feeds (any RSS 2.0 or Atom) ----------
+
+ATOM = "{http://www.w3.org/2005/Atom}"
+
+
+def read_feeds(path):
+    """One feed per line: name|url. # starts a comment"""
+    out = []
+    with open(path) as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            name, _, url = (p.strip() for p in line.partition("|"))
+            if not (name and url):
+                raise SystemExit(f"bad feed line: {line!r} (expected name|url)")
+            out.append((name, url))
+    return out
+
+
+def feed_date(text):
+    if not text:
+        return ""
+    try:
+        return parsedate_to_datetime(text).date().isoformat()
+    except (TypeError, ValueError):
+        return text[:10]  # Atom: ISO 8601
+
+
+def parse_vendor_feed(name, raw):
+    """Each entry is one item with one update. Its key is the feed name plus the entry link or id"""
+    try:
+        root = ET.fromstring(raw)
+        entries = list(root.iter("item")) or list(root.iter(ATOM + "entry"))
+    except ET.ParseError:
+        entries, _ = rss_items(raw)
+    items = []
+    for e in entries:
+        title = e.findtext("title") or e.findtext(ATOM + "title") or ""
+        link = e.findtext("link") or ""
+        if not link:
+            le = e.find(ATOM + "link")
+            link = le.get("href", "") if le is not None else ""
+        ident = e.findtext("guid") or e.findtext(ATOM + "id") or link or title
+        date = feed_date(e.findtext("pubDate") or e.findtext(ATOM + "updated") or e.findtext(ATOM + "published"))
+        body = (e.findtext("description") or e.findtext("content:encoded", namespaces=NS)
+                or e.findtext(ATOM + "summary") or e.findtext(ATOM + "content") or "")
+        text = strip_html(body)
+        items.append({
+            "key": f"feed:{name}:{ident}",
+            "source": f"feeds:{name}",
+            "title": title.strip(),
+            "link": link,
+            "date": date,
+            "summary": text[:1500],
+            "cves": sorted(set(CVE_RE.findall(title + body))),
+            "updates": [{"date": date, "text": "published", "id": fp("feed", name, ident)}],
+            "text": text[:8000],
         })
     return items
 
@@ -233,7 +316,9 @@ def fetch_osv(packages, osv_file=None):
 # ---------- enrichment ----------
 
 def add_kev_status(items, kev_items):
-    """Mark items whose CVEs are in KEV, and add an update so a status change is shown again"""
+    """Mark items whose CVEs are in KEV, and add an update so a status change is shown again.
+    kev_cves lists every CVE the item MENTIONS that is in KEV. A briefing can mention an older,
+    exploited CVE as background: the reader of the output decides whether it is the item's own"""
     kev = {i["cves"][0]: i["kev"] for i in kev_items}
     for i in items:
         if i["source"] == "kev":
@@ -270,7 +355,8 @@ def load_state(path):
         return None
     if st.get("version") == 2:  # vuln-digest prototype: {"slugs": {slug: {first_seen, updates}}}
         st = {"version": STATE_VERSION, "last_digest": st.get("last_digest"),
-              "items": {f"zerowire:{k}": {"first_seen": v.get("first_seen"), "fp": v.get("updates", [])}
+              "items": {f"zerowire:{k}": {"first_seen": v.get("first_seen"), "fp": v.get("updates", []),
+                                          "last_shown": st.get("last_digest") or v.get("first_seen")}
                         for k, v in st.get("slugs", {}).items()}}
     if st.get("version") != STATE_VERSION:
         raise SystemExit(f"{path}: unknown state version {st.get('version')!r}")
@@ -311,11 +397,22 @@ def collect(a):
         try:
             if src == "zerowire":
                 raw = open(a.zerowire_file, "rb").read() if a.zerowire_file else http_get(ZEROWIRE_FEED)
-                items += parse_zerowire(raw)
+                warnings = []
+                items += parse_zerowire(raw, warnings)
+                errors += [{"source": src, "error": w, "partial": True} for w in warnings]
             elif src == "kev":
                 raw = open(a.kev_file, "rb").read() if a.kev_file else http_get(KEV_JSON)
                 kev_items = parse_kev(raw)
                 items += kev_items
+            elif src == "feeds":
+                if not a.feeds:
+                    raise ValueError("feeds needs --feeds FILE")
+                for name, url in read_feeds(a.feeds):
+                    try:
+                        raw = open(url[7:], "rb").read() if url.startswith("file://") else http_get(url)
+                        items += parse_vendor_feed(name, raw)
+                    except Exception as e:
+                        errors.append({"source": f"feeds:{name}", "error": f"{type(e).__name__}: {e}"})
             elif src == "osv":
                 if not (a.packages or a.osv_file):
                     raise ValueError("osv needs --packages FILE")
@@ -338,6 +435,7 @@ def main():
     ap.add_argument("--days", type=int, default=28, help="history: items shown in the last N days (default 28)")
     ap.add_argument("--sources", default="zerowire,kev")
     ap.add_argument("--packages", help="file with ecosystem|name|version lines for OSV")
+    ap.add_argument("--feeds", help="file with name|url lines: vendor RSS or Atom feeds for the feeds source")
     ap.add_argument("--epss", action="store_true", help="add EPSS scores to the result")
     ap.add_argument("--kev-max-age", type=int, default=30,
                     help="show KEV entries added in the last N days only (default 30)")
@@ -404,7 +502,9 @@ def main():
             fresh = [u for u in i["updates"] if u["id"] not in seen and u.get("legacy") not in seen]
             if not fresh:
                 continue
-            i["status"], i["new_updates"] = "updated", fresh
+            # "updated" only for an item the user has seen; one known only from a --since rebuild is new to them
+            i["status"] = "updated" if known.get("last_shown") else "new"
+            i["new_updates"] = fresh
         result.append(i)
 
     if a.epss and result:
