@@ -26,6 +26,9 @@ Usage:
       no state file yet: treat every update dated before this day as already seen
   python3 -I vuln_feed.py fetch --all
       everything the sources hold now, state is not read or changed (preview)
+  python3 -I vuln_feed.py history [--days 28]
+      items delivered in the last N days, newest first: for the weekly summary
+      and for "I patched X" feedback
 
 Files (next to this script unless set): state.json, last_run.json
 Offline testing: --zerowire-file, --kev-file, --osv-file read local copies
@@ -87,10 +90,11 @@ def zerowire_updates(content):
     out = []
     for li in re.findall(r"<li>(.*?)</li>", m.group(1), re.S) if m else []:
         d = re.search(r'<time datetime="([^"]+)"', li)
-        date = d.group(1)[:10] if d else ""
+        stamp = d.group(1) if d else ""
         text = re.sub(r"^.*?</time>\s*:?\s*", "", li, count=1, flags=re.S) if d else li
         text = re.sub(r"\s+", " ", strip_html(text)).strip()
-        out.append({"date": date, "text": text, "id": fp(date, text)})
+        # the fingerprint uses the full timestamp: the same formula as the prototype's state v2
+        out.append({"date": stamp[:10], "text": text, "id": fp(stamp, text)})
     return out
 
 
@@ -105,8 +109,9 @@ def parse_zerowire(raw):
         date = parsedate_to_datetime(pd).date().isoformat() if pd else ""
         slug = guid.split("@")[0].rstrip("/").split("/")[-1]
         updates = zerowire_updates(content)
-        if not updates:
-            updates = [{"date": date, "text": "published", "id": fp("published", slug)}]
+        if not updates:  # "legacy": the prototype fingerprinted such items by guid
+            updates = [{"date": date, "text": "published", "id": fp("published", slug),
+                        "legacy": hashlib.sha1(guid.encode()).hexdigest()[:16]}]
         items.append({
             "key": f"zerowire:{slug}",
             "source": "zerowire",
@@ -286,6 +291,10 @@ def mark(state, items, today, only_before=None):
             continue
         s = state["items"].setdefault(i["key"], {"first_seen": today, "fp": []})
         s["fp"] = sorted(set(s["fp"]) | ids)
+        if only_before is None:  # delivered now: keep what the weekly summary and "I patched X" need
+            last = max(i["updates"], key=lambda u: u["date"])
+            s.update({"title": i.get("title"), "link": i.get("link"), "cves": i.get("cves", []),
+                      "last_shown": today, "last_update": last["text"]})
         for c in i.get("kev_cves", {}):  # the KEV entry was shown inside this item
             if fp("kev", c) in ids:
                 k = state["items"].setdefault(f"kev:{c}", {"first_seen": today, "fp": []})
@@ -325,7 +334,8 @@ def collect(a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["fetch", "mark"])
+    ap.add_argument("command", choices=["fetch", "mark", "history"])
+    ap.add_argument("--days", type=int, default=28, help="history: items shown in the last N days (default 28)")
     ap.add_argument("--sources", default="zerowire,kev")
     ap.add_argument("--packages", help="file with ecosystem|name|version lines for OSV")
     ap.add_argument("--epss", action="store_true", help="add EPSS scores to the result")
@@ -358,6 +368,18 @@ def main():
         print(f"marked {len(snap['items'])} item(s) as delivered", file=sys.stderr)
         return
 
+    if a.command == "history":
+        st = load_state(a.state)
+        if st is None:
+            raise SystemExit("state.json not found")
+        cutoff = (datetime.date.fromisoformat(today) - datetime.timedelta(days=a.days)).isoformat()
+        rows = [dict(key=k, **{f: v.get(f) for f in ("title", "link", "cves", "first_seen", "last_shown", "last_update")})
+                for k, v in st["items"].items() if (v.get("last_shown") or "") >= cutoff]
+        rows.sort(key=lambda r: r["last_shown"], reverse=True)
+        json.dump(rows, sys.stdout, ensure_ascii=False, indent=1)
+        print()
+        return
+
     items, errors, sources = collect(a)
     if "kev" in sources:  # the KEV catalog holds 1000+ entries; only recent ones are news
         cutoff = (datetime.date.fromisoformat(today) - datetime.timedelta(days=a.kev_max_age)).isoformat()
@@ -379,7 +401,7 @@ def main():
             i["status"], i["new_updates"] = "new", i["updates"]
         else:
             seen = set(known["fp"])
-            fresh = [u for u in i["updates"] if u["id"] not in seen]
+            fresh = [u for u in i["updates"] if u["id"] not in seen and u.get("legacy") not in seen]
             if not fresh:
                 continue
             i["status"], i["new_updates"] = "updated", fresh

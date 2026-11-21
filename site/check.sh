@@ -3,40 +3,75 @@
 set -eu
 
 SITE='https://vuln-digest.secmy.app/'
+PROMPT='Read https://vuln-digest.secmy.app/README.md and follow it: set up a scheduled vulnerability digest for me.'
+LANDING=_site/index.html
+DOCS=_site/docs/index.html
 
 fail() { echo "check failed: $1" >&2; exit 1; }
 
-# The HTML page links to the repository and keeps template braces from README.md
-grep -qF 'href="https://github.com/SecH0us3/vuln-digest"' _site/index.html || fail 'no repository link on the page'
-grep -qF 'ecosystem|name|version' _site/index.html || fail 'package line format lost'
+# --- The landing page ---
+cmp -s site/landing.html "$LANDING" || fail 'index.html differs from site/landing.html'
+[ "$(grep -c '<h1' "$LANDING")" = 1 ] || fail 'the landing page must have exactly one h1'
+[ "$(grep -cF "$PROMPT" "$LANDING")" = 2 ] || fail 'the landing page must show the start prompt twice, exactly as in check.sh'
+grep -qF 'href="/README.md"' "$LANDING" || fail 'the landing page does not link the instructions for AI'
+grep -qF 'href="/docs/"' "$LANDING" || fail 'the landing page does not link the instructions page'
+grep -qF 'href="https://github.com/SecH0us3/vuln-digest"' "$LANDING" || fail 'the landing page does not link the repository'
+grep -q '<meta name="description" content="..*">' "$LANDING" || fail 'landing: no meta description'
+grep -qF "<link rel=\"canonical\" href=\"${SITE}\">" "$LANDING" || fail 'landing: no canonical link'
+grep -qF "<meta property=\"og:image\" content=\"${SITE}social-preview.png\">" "$LANDING" || fail 'landing: no og:image'
+grep -q '<meta name="viewport"' "$LANDING" || fail 'landing: no viewport meta'
+if grep -q '<script[^>]*src=' "$LANDING"; then fail 'landing: external scripts are not allowed'; fi
+if grep -qiE '(href|src)="http://' "$LANDING" _site/404.html; then fail 'plain http link'; fi
 
-# The page has one title, and the table of contents lists the steps but not the title
-[ "$(grep -c '<h1' _site/index.html)" = 1 ] || fail 'the page must have exactly one h1'
+# Every site-local link of the landing and 404 pages exists in the build
+for path in $(grep -ohE '(href|src)="/[^"#]*"' "$LANDING" _site/404.html | sed -E 's/^(href|src)="//; s/"$//' | sort -u); do
+  case "$path" in
+    */) file="_site${path}index.html" ;;
+    *) file="_site${path}" ;;
+  esac
+  [ -f "$file" ] || fail "linked file is not in the build: $path"
+done
 
-toc="$(sed -n '/<nav id="TOC"/,/<\/nav>/p' _site/index.html)"
+# Every in-page anchor of the landing page has a target
+for id in $(grep -oE 'href="#[^"]+"' "$LANDING" | sed -E 's/href="#//; s/"$//' | sort -u); do
+  grep -qE "id=\"$id\"" "$LANDING" || fail "anchor without target: #$id"
+done
+
+# The helper script size claim on the landing page stays true (about 400 lines)
+lines="$(wc -l < tools/vuln_feed.py)"
+[ "$lines" -ge 300 ] && [ "$lines" -le 500 ] || fail "vuln_feed.py has $lines lines: update the landing page text"
+
+# --- The instructions page ---
+grep -qF 'href="https://github.com/SecH0us3/vuln-digest"' "$DOCS" || fail 'no repository link on the instructions page'
+grep -qF 'ecosystem|name|version' "$DOCS" || fail 'package line format lost'
+[ "$(grep -c '<h1' "$DOCS")" = 1 ] || fail 'the instructions page must have exactly one h1'
+toc="$(sed -n '/<nav id="TOC"/,/<\/nav>/p' "$DOCS")"
 echo "$toc" | grep -q 'Step 1\.' || fail 'table of contents has no steps'
 echo "$toc" | grep -q '>Run<' || fail 'table of contents has no Run section'
 if echo "$toc" | grep -q 'scheduled vulnerability reports'; then fail 'table of contents repeats the document title'; fi
+grep -q '<meta name="description" content="..*">' "$DOCS" || fail 'docs: no meta description'
+grep -qF "<link rel=\"canonical\" href=\"${SITE}docs/\">" "$DOCS" || fail 'docs: no canonical link'
+grep -qF "<meta property=\"og:image\" content=\"${SITE}social-preview.png\">" "$DOCS" || fail 'docs: no og:image'
+grep -qF 'href="/style.css"' "$DOCS" || fail 'docs: stylesheet path must be absolute'
+grep -qF 'href="/"' "$DOCS" || fail 'docs: no link back to the landing page'
 
-# The page has a description, a canonical address and a preview image for social networks
-grep -q '<meta name="description" content="..*">' _site/index.html || fail 'no meta description'
-grep -qF '<link rel="canonical" href="https://vuln-digest.secmy.app/">' _site/index.html || fail 'no canonical link'
-grep -qF '<meta property="og:image" content="https://vuln-digest.secmy.app/social-preview.png">' _site/index.html || fail 'no og:image'
-for f in favicon.svg favicon-32.png apple-touch-icon.png social-preview.png; do
+# --- Icons and the preview image ---
+for f in favicon.svg favicon-32.png apple-touch-icon.png social-preview.png style.css landing.css 404.html; do
   [ -s "_site/$f" ] || fail "missing file: $f"
 done
 # PNG stores width and height as two 4-byte numbers starting at byte 17
 [ "$(od -An -tu1 -j16 -N8 _site/social-preview.png | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')" = '0 0 4 176 0 0 2 118' ] || fail 'social-preview.png must be 1200x630'
 
-# The Markdown copies are identical to their sources
+# --- Copies for agents ---
 cmp -s README.md _site/README.md || fail 'README.md copy differs'
 cmp -s README.md _site/index.md || fail 'index.md differs from README.md'
 cmp -s README.md _site/llms-full.txt || fail 'llms-full.txt differs from README.md'
 cmp -s AGENTS.md _site/AGENTS.md || fail 'AGENTS.md copy differs'
 cmp -s tools/vuln_feed.py _site/vuln_feed.py || fail 'vuln_feed.py copy differs'
 
-# The README tells agents to download the script from this address
+# The README tells agents where the script and the instructions live
 grep -qF "${SITE}vuln_feed.py" README.md || fail 'README.md does not link the helper script'
+grep -qF "${SITE}README.md" README.md || fail 'README.md does not give its own address for the job prompt'
 
 # llms-full.txt starts with an H1 and has H2 sections
 head -n 1 _site/llms-full.txt | grep -q '^# ' || fail 'llms-full.txt does not start with an H1'
@@ -50,7 +85,9 @@ grep -q '^- \[' _site/llms.txt || fail 'llms.txt has no link list'
 # Every link in llms.txt and sitemap.xml that points to this site exists in the build
 for url in $(grep -ho "${SITE}[^)<\"]*" _site/llms.txt _site/sitemap.xml | sort -u); do
   path="${url#"$SITE"}"
-  [ -n "$path" ] || path='index.html'
+  case "$path" in
+    ''|*/) path="${path}index.html" ;;
+  esac
   [ -f "_site/$path" ] || fail "linked file is not in the build: $url"
 done
 

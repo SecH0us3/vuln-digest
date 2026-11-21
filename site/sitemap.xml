@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://vuln-digest.secmy.app/</loc></url>
+  <url><loc>https://vuln-digest.secmy.app/docs/</loc></url>
   <url><loc>https://vuln-digest.secmy.app/README.md</loc></url>
   <url><loc>https://vuln-digest.secmy.app/AGENTS.md</loc></url>
   <url><loc>https://vuln-digest.secmy.app/llms.txt</loc></url>

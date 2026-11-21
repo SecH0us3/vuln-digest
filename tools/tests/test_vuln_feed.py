@@ -1,4 +1,5 @@
 """Offline tests for vuln_feed.py. Run from the repository root: python3 -m unittest discover -s tools/tests"""
+import hashlib
 import json
 import os
 import shutil
@@ -135,15 +136,32 @@ class VulnFeedTest(unittest.TestCase):
         self.assertIn("zerowire:nginx2root", self.keys(out))
 
     def test_v2_state_is_migrated(self):
-        out = self.fetch("--all")
-        nginx = next(i for i in out["items"] if i["key"] == "zerowire:nginx2root")
+        # fingerprints exactly as the prototype computed them: sha1("<datetime attribute>|<text>")
+        def v2(stamp, text):
+            return hashlib.sha1(f"{stamp}|{text}".encode()).hexdigest()[:16]
         v2 = {"version": 2, "last_digest": "2026-11-19",
-              "slugs": {"nginx2root": {"first_seen": "2026-11-19", "updates": [u["id"] for u in nginx["updates"]]}}}
+              "slugs": {"nginx2root": {"first_seen": "2026-11-19", "updates": [
+                  v2("2026-11-18T10:00:00Z", "Initial briefing"),
+                  v2("2026-11-19T08:00:00Z", "F5 says ASLR bypass is needed")]},
+                        "old": {"first_seen": "2026-11-19", "updates": [
+                  hashlib.sha1(b"old@2026-10-01").hexdigest()[:16]]}}}
         dump(v2, self.state)
         out = self.fetch()
         self.assertNotIn("zerowire:nginx2root", self.keys(out))
+        self.assertNotIn("zerowire:old", self.keys(out))
         self.assertIn("zerowire:java4shell", self.keys(out))
         self.assertEqual(out["last_digest"], "2026-11-19")
+
+    def test_history_lists_delivered_items_only(self):
+        self.fetch("--since", "2026-11-19")  # java4shell is older than --since: seen, not delivered
+        self.run_tool("mark")
+        rows = json.loads(self.run_tool("history", "--days", "7").stdout)
+        self.assertEqual([r["key"] for r in rows], ["zerowire:nginx2root"])
+        self.assertEqual(rows[0]["last_shown"], "2026-11-20")
+        self.assertEqual(rows[0]["last_update"], "F5 says ASLR bypass is needed")
+        self.assertIn("CVE-2026-123007", rows[0]["cves"])
+        later = json.loads(self.run_tool("history", "--days", "7", today="2026-12-20").stdout)
+        self.assertEqual(later, [])
 
     def test_osv_items(self):
         p = self.run_tool("fetch", "--all", "--sources", "osv", "--osv-file", os.path.join(FIX, "osv.json"))

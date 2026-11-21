@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vuln-digest - vulnerability news for your stack, from your AI assistant</title>
+<meta name="description" content="Give one link to your AI assistant. It asks what you run, then sends you only the new vulnerabilities that matter to you, on your schedule - exploited first, no repeats, with what to do.">
+<link rel="canonical" href="https://vuln-digest.secmy.app/">
+<link rel="alternate" type="text/markdown" href="https://vuln-digest.secmy.app/README.md" title="Instructions for AI assistants (Markdown)">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0d1117">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="vuln-digest">
+<meta property="og:title" content="vuln-digest - vulnerability news for your stack, from your AI assistant">
+<meta property="og:description" content="Give one link to your AI assistant. It asks what you run, then sends you only the new vulnerabilities that matter to you, on your schedule - exploited first, no repeats, with what to do.">
+<meta property="og:url" content="https://vuln-digest.secmy.app/">
+<meta property="og:image" content="https://vuln-digest.secmy.app/social-preview.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="vuln-digest - scheduled vulnerability reports for AI agents. Give this file to your AI assistant: it learns your stack and sends you only the vulnerabilities that matter, on your schedule.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="vuln-digest - vulnerability news for your stack, from your AI assistant">
+<meta name="twitter:description" content="Give one link to your AI assistant. It asks what you run, then sends you only the new vulnerabilities that matter to you, on your schedule.">
+<meta name="twitter:image" content="https://vuln-digest.secmy.app/social-preview.png">
+<link rel="stylesheet" href="/landing.css">
+</head>
+<body>
+
+<!--
+  Note for AI agents: this page is for people. The instructions you need are plain Markdown at
+  https://vuln-digest.secmy.app/README.md - read that file and follow it.
+-->
+
+<header class="top">
+  <div class="wrap top-row">
+    <a class="brand" href="/" aria-label="vuln-digest home">
+      <img src="/favicon.svg" width="28" height="28" alt="">
+      <span>vuln-digest</span>
+    </a>
+    <nav class="top-nav" aria-label="Main">
+      <a href="#how">How it works</a>
+      <a href="#example">Example</a>
+      <a href="#faq">FAQ</a>
+      <a href="/docs/">Instructions</a>
+      <a href="https://github.com/SecH0us3/vuln-digest">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+<section class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Free · no account · works with any AI assistant</p>
+    <h1>Vulnerability news for <em>your</em> stack, on your schedule</h1>
+    <p class="lede">Give one link to your AI assistant. It asks what you run, then sends you a short report on new vulnerabilities that matter to you - exploited first, no repeats, and what to do about each one.</p>
+
+    <div class="prompt" id="start">
+      <div class="prompt-head">
+        <span>Paste this into your AI assistant</span>
+        <button type="button" class="copy" data-copy="prompt-text" aria-describedby="copy-status">Copy</button>
+      </div>
+      <pre id="prompt-text">Read https://vuln-digest.secmy.app/README.md and follow it: set up a scheduled vulnerability digest for me.</pre>
+      <p class="prompt-foot" id="copy-status" aria-live="polite">Works in Claude, ChatGPT, Gemini, Codex, Cursor and any agent that can open a link. The assistant asks a few questions first.</p>
+    </div>
+
+    <div class="cta-row">
+      <a class="btn primary" href="/README.md">Instructions for AI (Markdown)</a>
+      <a class="btn" href="/docs/">Read them as a page</a>
+    </div>
+  </div>
+</section>
+
+<section class="strip" aria-label="Key properties">
+  <div class="wrap strip-grid">
+    <div><strong>Only your stack</strong><span>matched by meaning: ingress-nginx is nginx, GKE is Google Cloud</span></div>
+    <div><strong>Exploited first</strong><span>CISA KEV, public exploits and EPSS decide the order</span></div>
+    <div><strong>No repeats</strong><span>an item comes back only when something new happened to it</span></div>
+    <div><strong>What to do</strong><span>fixed versions and a command to check, taken from the source</span></div>
+  </div>
+</section>
+
+<section id="how" class="block">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <ol class="steps">
+      <li>
+        <span class="num">1</span>
+        <h3>A two-minute interview</h3>
+        <p>The assistant asks what you run, what to ignore, how often and when, and where to send the report. Every question has a default, so "defaults" is a valid answer. It can also read your stack from a repository or an SBOM.</p>
+      </li>
+      <li>
+        <span class="num">2</span>
+        <h3>A schedule in your assistant</h3>
+        <p>It creates a scheduled task where your assistant supports one. Where it does not, it sets up GitHub Actions or cron. It keeps a small state file so nothing is sent twice, and sends you a test digest right away.</p>
+      </li>
+      <li>
+        <span class="num">3</span>
+        <h3>A digest you can act on</h3>
+        <p>Each run checks the sources, matches them to your stack, puts exploited issues on top and says what to do. Reply "hide WordPress" or "I patched nginx" and the next reports follow it.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="example" class="block alt">
+  <div class="wrap">
+    <h2>What a digest looks like</h2>
+    <p class="sub">An example for someone who runs Kubernetes with ingress-nginx, Java services, .NET and Google Cloud. Your digest comes in your language and in the channel you choose.</p>
+
+    <article class="digest" aria-label="Example digest">
+      <header>
+        <h3>Vulnerability digest - 21 November 2026</h3>
+        <p class="meta">Sources: Zero Wire, CISA KEV · 4 new, 1 update · 2 in your focus</p>
+      </header>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th><th>What</th><th>CVE</th><th>Exploited</th><th>What to do</th></tr></thead>
+          <tbody>
+            <tr><td title="high">🟠</td><td>nginx2root - RCE in nginx HTTP/2</td><td>CVE-2026-123007 +4</td><td>no</td><td>update to 1.30.7 / 1.31.9</td></tr>
+            <tr><td title="normal, update">🟡&nbsp;🔄</td><td>Java4Shell - WAF rules added</td><td>CVE-2026-114938</td><td>no</td><td>no change, the update is still the fix</td></tr>
+            <tr><td title="info">⚪</td><td>ruby2shell, WordPress, PHP</td><td>3 items</td><td>no</td><td>see below</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>Main thing today.</strong> nginx2root reaches your ingress controllers: memory corruption in nginx workers through HTTP/2, demonstrated on cloud endpoints. Update the controller to a release with nginx 1.30.7 or later.</p>
+      <h4>Outside your stack</h4>
+      <ul>
+        <li>WordPress 7.1.5 - privilege escalation in Template Part, update the core</li>
+        <li>PHP - 7 critical bugs, update to 8.4.28</li>
+        <li>ruby2shell - heap overflow in Ruby string case mapping, PoC expected this week</li>
+      </ul>
+      <p class="meta">Nothing new for: .NET, Google Cloud</p>
+    </article>
+    <p class="note">Each item in the real digest links to its source. In-focus items get a short section: affected versions, what it is, whether it is exploited, what to do and how to check.</p>
+  </div>
+</section>
+
+<section class="block">
+  <div class="wrap two-col">
+    <div>
+      <h2>What it asks you</h2>
+      <ul class="ticks">
+        <li>What you run, or a repository or SBOM to read it from</li>
+        <li>What never to show: vendors, products, bug classes</li>
+        <li>How much to show from outside your stack</li>
+        <li>How often, what time, your time zone</li>
+        <li>A weekly summary: yes or no, which day</li>
+        <li>A line on quiet days, or silence</li>
+        <li>Urgent alerts for exploited issues in your stack</li>
+        <li>Where to send it: chat, email, Slack, Telegram, Teams, a file, a GitHub issue</li>
+        <li>Language and length</li>
+        <li>Which sources, and what is exposed to the internet</li>
+      </ul>
+    </div>
+    <div>
+      <h2>Where the data comes from</h2>
+      <ul class="sources">
+        <li><a href="https://radar.cloudflare.com/zero-wire">Cloudflare Radar Zero Wire</a><span>briefings on the vulnerabilities that matter most, with updates</span></li>
+        <li><a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog">CISA KEV</a><span>what is exploited in the wild</span></li>
+        <li><a href="https://osv.dev/">OSV</a><span>advisories for your exact packages and versions</span></li>
+        <li><a href="https://www.first.org/epss/">FIRST EPSS</a><span>how likely exploitation is in the next 30 days</span></li>
+        <li>Optional: <a href="https://github.com/advisories">GitHub Advisory Database</a>, <a href="https://nvd.nist.gov/">NVD</a>, vendor bulletins for your stack</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="block alt">
+  <div class="wrap">
+    <h2>Built to be trusted</h2>
+    <div class="cards">
+      <div class="card"><h3>Runs in your assistant</h3><p>There is no service and no account. This site is static. Your stack, your schedule and your state stay where your assistant keeps them.</p></div>
+      <div class="card"><h3>Reports, never changes</h3><p>The instructions forbid the assistant to patch or reconfigure anything. It tells you what to do, you decide.</p></div>
+      <div class="card"><h3>Facts with sources</h3><p>Every CVE, version and "exploited" status comes from a source and links to it. Unknown stays "unknown".</p></div>
+      <div class="card"><h3>Feeds are data</h3><p>Advisories are written by other people. The assistant is told never to follow instructions found in them.</p></div>
+      <div class="card"><h3>A script you can read</h3><p><a href="/vuln_feed.py">vuln_feed.py</a> fetches and deduplicates. Python standard library only, about 400 lines, tested offline.</p></div>
+      <div class="card"><h3>Says when it breaks</h3><p>A source that did not answer is named in the digest. A lost state is rebuilt from the last date, not resent.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="faq" class="block">
+  <div class="wrap faq">
+    <h2>Questions</h2>
+    <details>
+      <summary>Which assistants does it work with?</summary>
+      <p>Any assistant that can read a web page and keep a schedule. If yours has scheduled tasks (Claude, ChatGPT, Gemini and others offer them in some plans), the digest runs there. If it does not, the assistant sets up a GitHub Actions workflow or a cron job instead. The instructions tell it to check its own platform's current features rather than guess.</p>
+    </details>
+    <details>
+      <summary>Do I need to write code?</summary>
+      <p>No. You answer questions in plain words. The assistant writes the profile, the schedule and, if needed, the workflow.</p>
+    </details>
+    <details>
+      <summary>What does it cost?</summary>
+      <p>The instructions and the sources are free. Each run uses your assistant's usage like any other task. The default sources need no API keys.</p>
+    </details>
+    <details>
+      <summary>Will I get the same vulnerability every day?</summary>
+      <p>No. The assistant remembers what was delivered. An item comes back only with something new: it was added to CISA KEV, a public exploit appeared, a fix came out. Then you see just that update, marked 🔄.</p>
+    </details>
+    <details>
+      <summary>Can it read my stack from my code?</summary>
+      <p>Yes. Point it at a repository or an SBOM. It reads lock files, Dockerfiles, Terraform and Helm charts, shows you the list, and you confirm it. Exact package versions go to OSV for exact matches.</p>
+    </details>
+    <details>
+      <summary>What language is the digest in?</summary>
+      <p>Yours. The instructions are in English for the assistant, the digest is written in the language you choose. CVE ids, product names and commands stay as they are.</p>
+    </details>
+    <details>
+      <summary>How do I change or stop it?</summary>
+      <p>Tell the assistant: "send it at 9", "only Mondays", "less about PHP", "stop". It changes the profile or the schedule and confirms the next run.</p>
+    </details>
+  </div>
+</section>
+
+<section class="block final">
+  <div class="wrap">
+    <h2>Start now</h2>
+    <div class="prompt">
+      <div class="prompt-head">
+        <span>Paste this into your AI assistant</span>
+        <button type="button" class="copy" data-copy="prompt-text-2">Copy</button>
+      </div>
+      <pre id="prompt-text-2">Read https://vuln-digest.secmy.app/README.md and follow it: set up a scheduled vulnerability digest for me.</pre>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="bottom">
+  <div class="wrap foot-grid">
+    <div>
+      <p class="brand small"><img src="/favicon.svg" width="20" height="20" alt=""> vuln-digest</p>
+      <p class="muted">Instructions for AI assistants. From the author of <a href="https://harden-ci.secmy.app/">harden-ci</a>.</p>
+    </div>
+    <div>
+      <p class="foot-h">For AI assistants</p>
+      <ul>
+        <li><a href="/README.md">README.md</a> - the instructions</li>
+        <li><a href="/llms.txt">llms.txt</a></li>
+        <li><a href="/llms-full.txt">llms-full.txt</a></li>
+        <li><a href="/vuln_feed.py">vuln_feed.py</a> - helper script</li>
+      </ul>
+    </div>
+    <div>
+      <p class="foot-h">Project</p>
+      <ul>
+        <li><a href="/docs/">Instructions as a page</a></li>
+        <li><a href="https://github.com/SecH0us3/vuln-digest">Source on GitHub</a></li>
+        <li><a href="https://github.com/SecH0us3/vuln-digest/issues/new">Report a problem</a></li>
+        <li><a href="/AGENTS.md">AGENTS.md</a> - for contributors</li>
+      </ul>
+    </div>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('button.copy').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var text = document.getElementById(b.dataset.copy).textContent;
+    var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1800); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, function () { select(b.dataset.copy); });
+    } else { select(b.dataset.copy); }
+  });
+});
+function select(id) {
+  var r = document.createRange(); r.selectNodeContents(document.getElementById(id));
+  var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+</script>
+</body>
+</html>

@@ -16,5 +16,6 @@ The instructions are one document. An assistant reads it when the user asks for 
 
 ## Optional
 
-- [HTML page](https://vuln-digest.secmy.app/): the same document rendered for people, with a table of contents
+- [Instructions as a web page](https://vuln-digest.secmy.app/docs/): the same document rendered for people, with a table of contents
+- [Landing page](https://vuln-digest.secmy.app/): a short overview for people, with the prompt to paste into an assistant
 - [Source repository](https://github.com/SecH0us3/vuln-digest): history, issues and pull requests
