@@ -1,0 +1,3 @@
+[{"package":{"ecosystem":"npm","name":"next","version":"16.2.0"},
+  "vuln":{"id":"GHSA-xxxx-yyyy-zzzz","summary":"RCE in React Server Components","details":"Typed array RCE","aliases":["CVE-2026-126187"],"published":"2026-11-10T00:00:00Z","modified":"2026-11-12T00:00:00Z","database_specific":{"severity":"CRITICAL"},
+  "affected":[{"package":{"ecosystem":"npm","name":"next"},"ranges":[{"type":"SEMVER","events":[{"introduced":"16.0.0"},{"fixed":"16.4.1"}]}]}]}}]

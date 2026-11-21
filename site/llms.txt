@@ -1,0 +1,20 @@
+# vuln-digest
+
+> Instructions that an AI assistant follows to set up a scheduled digest of new vulnerabilities for its user: an interview about the user's stack, a profile, durable state, a schedule, delivery, and the steps of every run - fetch, deduplicate, match to the stack, rate, say what to do.
+
+The instructions are one document. An assistant reads it when the user asks for a vulnerability digest, asks the user a few questions, sets up the scheduled job, and shows a test digest. A small helper script does the fetching and the deduplication.
+
+## Docs
+
+- [vuln-digest instructions](https://vuln-digest.secmy.app/README.md): the full document as plain Markdown - the working rules, 6 setup steps, the run steps, the digest format and the sources
+- [Full text in one file](https://vuln-digest.secmy.app/llms-full.txt): the same document, for tools that look for llms-full.txt
+- [Helper script](https://vuln-digest.secmy.app/vuln_feed.py): Python, standard library only - fetches Zero Wire, CISA KEV and OSV, and remembers what was delivered
+
+## Contributing
+
+- [AGENTS.md](https://vuln-digest.secmy.app/AGENTS.md): how to build, check and change vuln-digest itself, for agents that edit its repository
+
+## Optional
+
+- [HTML page](https://vuln-digest.secmy.app/): the same document rendered for people, with a table of contents
+- [Source repository](https://github.com/SecH0us3/vuln-digest): history, issues and pull requests

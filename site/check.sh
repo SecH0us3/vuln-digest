@@ -1,0 +1,65 @@
+#!/bin/sh
+# Checks the site built by site/build.sh. Run from the repository root: sh site/check.sh
+set -eu
+
+SITE='https://vuln-digest.secmy.app/'
+
+fail() { echo "check failed: $1" >&2; exit 1; }
+
+# The HTML page links to the repository and keeps template braces from README.md
+grep -qF 'href="https://github.com/SecH0us3/vuln-digest"' _site/index.html || fail 'no repository link on the page'
+grep -qF 'ecosystem|name|version' _site/index.html || fail 'package line format lost'
+
+# The page has one title, and the table of contents lists the steps but not the title
+[ "$(grep -c '<h1' _site/index.html)" = 1 ] || fail 'the page must have exactly one h1'
+
+toc="$(sed -n '/<nav id="TOC"/,/<\/nav>/p' _site/index.html)"
+echo "$toc" | grep -q 'Step 1\.' || fail 'table of contents has no steps'
+echo "$toc" | grep -q '>Run<' || fail 'table of contents has no Run section'
+if echo "$toc" | grep -q 'scheduled vulnerability reports'; then fail 'table of contents repeats the document title'; fi
+
+# The page has a description, a canonical address and a preview image for social networks
+grep -q '<meta name="description" content="..*">' _site/index.html || fail 'no meta description'
+grep -qF '<link rel="canonical" href="https://vuln-digest.secmy.app/">' _site/index.html || fail 'no canonical link'
+grep -qF '<meta property="og:image" content="https://vuln-digest.secmy.app/social-preview.png">' _site/index.html || fail 'no og:image'
+for f in favicon.svg favicon-32.png apple-touch-icon.png social-preview.png; do
+  [ -s "_site/$f" ] || fail "missing file: $f"
+done
+# PNG stores width and height as two 4-byte numbers starting at byte 17
+[ "$(od -An -tu1 -j16 -N8 _site/social-preview.png | tr -s ' \n' ' ' | sed 's/^ //; s/ $//')" = '0 0 4 176 0 0 2 118' ] || fail 'social-preview.png must be 1200x630'
+
+# The Markdown copies are identical to their sources
+cmp -s README.md _site/README.md || fail 'README.md copy differs'
+cmp -s README.md _site/index.md || fail 'index.md differs from README.md'
+cmp -s README.md _site/llms-full.txt || fail 'llms-full.txt differs from README.md'
+cmp -s AGENTS.md _site/AGENTS.md || fail 'AGENTS.md copy differs'
+cmp -s tools/vuln_feed.py _site/vuln_feed.py || fail 'vuln_feed.py copy differs'
+
+# The README tells agents to download the script from this address
+grep -qF "${SITE}vuln_feed.py" README.md || fail 'README.md does not link the helper script'
+
+# llms-full.txt starts with an H1 and has H2 sections
+head -n 1 _site/llms-full.txt | grep -q '^# ' || fail 'llms-full.txt does not start with an H1'
+grep -q '^## ' _site/llms-full.txt || fail 'llms-full.txt has no H2 sections'
+
+# llms.txt: exactly one H1, a blockquote, a link list
+[ "$(grep -c '^# ' _site/llms.txt)" = 1 ] || fail 'llms.txt must have exactly one H1'
+grep -q '^> ' _site/llms.txt || fail 'llms.txt has no blockquote'
+grep -q '^- \[' _site/llms.txt || fail 'llms.txt has no link list'
+
+# Every link in llms.txt and sitemap.xml that points to this site exists in the build
+for url in $(grep -ho "${SITE}[^)<\"]*" _site/llms.txt _site/sitemap.xml | sort -u); do
+  path="${url#"$SITE"}"
+  [ -n "$path" ] || path='index.html'
+  [ -f "_site/$path" ] || fail "linked file is not in the build: $url"
+done
+
+# robots.txt: every group has a rule, and the sitemap line is absolute
+grep -q "^Sitemap: ${SITE}sitemap.xml$" _site/robots.txt || fail 'robots.txt has no Sitemap line'
+[ "$(grep -c '^User-agent: ' _site/robots.txt)" = "$(grep -c '^Allow: \|^Disallow: ' _site/robots.txt)" ] || fail 'robots.txt: a group has no rule'
+
+# ai.txt agrees with robots.txt: neither file forbids anything
+cmp -s site/ai.txt _site/ai.txt || fail 'ai.txt copy differs'
+if grep -q '^Disallow:' _site/robots.txt _site/ai.txt; then fail 'robots.txt and ai.txt must not forbid anything: the policy is allow all'; fi
+
+echo 'all checks passed'

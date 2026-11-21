@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+<channel>
+<title>Zero Wire</title>
+<item>
+<title>nginx2root: RCE in nginx HTTP/2</title>
+<link>https://radar.cloudflare.com/zero-wire/nginx2root</link>
+<guid>nginx2root@2026-11-18</guid>
+<pubDate>Wed, 18 Nov 2026 10:00:00 GMT</pubDate>
+<description>Critical. Memory corruption in nginx workers.</description>
+<content:encoded><![CDATA[<p>CVE-2026-123007 and CVE-2026-123633. Last reviewed 2026-11-19.</p>
+<h2>Updates</h2><ul>
+<li><time datetime="2026-11-18T10:00:00Z">Nov 18</time>: Initial briefing</li>
+<li><time datetime="2026-11-19T08:00:00Z">Nov 19</time>: F5 says ASLR bypass is needed</li>
+</ul>]]></content:encoded>
+</item>
+<item>
+<title>Java4Shell: RCE in OpenJDK</title>
+<link>https://radar.cloudflare.com/zero-wire/java4shell</link>
+<guid>java4shell@2026-11-17</guid>
+<pubDate>Tue, 17 Nov 2026 10:00:00 GMT</pubDate>
+<description>High. Out of bounds write.</description>
+<content:encoded><![CDATA[<p>CVE-2026-114938.</p>
+<h2>Updates</h2><ul>
+<li><time datetime="2026-11-17T10:00:00Z">Nov 17</time>: Initial briefing</li>
+</ul>]]></content:encoded>
+</item>
+<item>
+<title>Old item without updates list</title>
+<link>https://radar.cloudflare.com/zero-wire/old</link>
+<guid>old@2026-10-01</guid>
+<pubDate>Thu, 01 Oct 2026 10:00:00 GMT</pubDate>
+<description>Low.</description>
+<content:encoded><![CDATA[<p>No CVE.</p>]]></content:encoded>
+</item>
+</channel>
+</rss>
