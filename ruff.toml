@@ -1,0 +1,11 @@
+# Static analysis of the helper script: the flake8-bandit security rules (S)
+# Runs in CI: ruff check
+target-version = "py39"
+include = ["tools/**/*.py"]
+
+[lint]
+select = ["S"]
+
+[lint.per-file-ignores]
+# the tests start the script with subprocess and compute the old sha1 fingerprints to build fixtures
+"tools/tests/*" = ["S603", "S324"]
