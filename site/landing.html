@@ -67,6 +67,23 @@
       <p class="prompt-foot" id="copy-status" aria-live="polite">Works in Claude, ChatGPT, Gemini, Codex, Cursor and any agent that can open a link. The assistant asks a few questions first.</p>
     </div>
 
+    <div class="prompt plugin">
+      <div class="prompt-head">
+        <span>Or, in Claude Code: install the plugin</span>
+      </div>
+      <div class="cmd-row">
+        <span class="cmd-step">1</span>
+        <code id="plugin-add">/plugin marketplace add SecH0us3/vuln-digest</code>
+        <button type="button" class="copy" data-copy="plugin-add">Copy</button>
+      </div>
+      <div class="cmd-row">
+        <span class="cmd-step">2</span>
+        <code id="plugin-install">/plugin install vuln-digest@vuln-digest</code>
+        <button type="button" class="copy" data-copy="plugin-install">Copy</button>
+      </div>
+      <p class="prompt-foot">Run the commands one at a time, then ask Claude for a vulnerability digest. The plugin holds the same instructions: one skill and the helper script, no hooks, no MCP servers.</p>
+    </div>
+
     <div class="cta-row">
       <a class="btn primary" href="README.md">Instructions for AI (Markdown)</a>
       <a class="btn" href="docs/">Read them as a page</a>
@@ -234,6 +251,23 @@
         <button type="button" class="copy" data-copy="prompt-text-2">Copy</button>
       </div>
       <pre id="prompt-text-2">Read https://vuln-digest.secmy.app/README.md and follow it: set up a scheduled vulnerability digest for me.</pre>
+    </div>
+
+    <div class="prompt plugin">
+      <div class="prompt-head">
+        <span>Or, in Claude Code: install the plugin</span>
+      </div>
+      <div class="cmd-row">
+        <span class="cmd-step">1</span>
+        <code id="plugin-add-2">/plugin marketplace add SecH0us3/vuln-digest</code>
+        <button type="button" class="copy" data-copy="plugin-add-2">Copy</button>
+      </div>
+      <div class="cmd-row">
+        <span class="cmd-step">2</span>
+        <code id="plugin-install-2">/plugin install vuln-digest@vuln-digest</code>
+        <button type="button" class="copy" data-copy="plugin-install-2">Copy</button>
+      </div>
+      <p class="prompt-foot">Run the commands one at a time, then ask Claude for a vulnerability digest. The plugin holds the same instructions: one skill and the helper script, no hooks, no MCP servers.</p>
     </div>
   </div>
 </section>
