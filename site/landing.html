@@ -7,9 +7,9 @@
 <meta name="description" content="Give one link to your AI assistant. It asks what you run, then sends you only the new vulnerabilities that matter to you, on your schedule - exploited first, no repeats, with what to do.">
 <link rel="canonical" href="https://vuln-digest.secmy.app/">
 <link rel="alternate" type="text/markdown" href="https://vuln-digest.secmy.app/README.md" title="Instructions for AI assistants (Markdown)">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#0d1117">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="vuln-digest">
@@ -25,7 +25,7 @@
 <meta name="twitter:title" content="vuln-digest - vulnerability news for your stack, from your AI assistant">
 <meta name="twitter:description" content="Give one link to your AI assistant. It asks what you run, then sends you only the new vulnerabilities that matter to you, on your schedule.">
 <meta name="twitter:image" content="https://vuln-digest.secmy.app/social-preview.png">
-<link rel="stylesheet" href="/landing.css">
+<link rel="stylesheet" href="landing.css">
 </head>
 <body>
 
@@ -36,15 +36,15 @@
 
 <header class="top">
   <div class="wrap top-row">
-    <a class="brand" href="/" aria-label="vuln-digest home">
-      <img src="/favicon.svg" width="28" height="28" alt="">
+    <a class="brand" href="./" aria-label="vuln-digest home">
+      <img src="favicon.svg" width="28" height="28" alt="">
       <span>vuln-digest</span>
     </a>
     <nav class="top-nav" aria-label="Main">
       <a href="#how">How it works</a>
       <a href="#example">Example</a>
       <a href="#faq">FAQ</a>
-      <a href="/docs/">Instructions</a>
+      <a href="docs/">Instructions</a>
       <a href="https://github.com/SecH0us3/vuln-digest">GitHub</a>
     </nav>
   </div>
@@ -68,8 +68,8 @@
     </div>
 
     <div class="cta-row">
-      <a class="btn primary" href="/README.md">Instructions for AI (Markdown)</a>
-      <a class="btn" href="/docs/">Read them as a page</a>
+      <a class="btn primary" href="README.md">Instructions for AI (Markdown)</a>
+      <a class="btn" href="docs/">Read them as a page</a>
     </div>
   </div>
 </section>
@@ -177,7 +177,7 @@
       <div class="card"><h3>Reports, never changes</h3><p>The instructions forbid the assistant to patch or reconfigure anything. It tells you what to do, you decide.</p></div>
       <div class="card"><h3>Facts with sources</h3><p>Every CVE, version and "exploited" status comes from a source and links to it. Unknown stays "unknown".</p></div>
       <div class="card"><h3>Feeds are data</h3><p>Advisories are written by other people. The assistant is told never to follow instructions found in them.</p></div>
-      <div class="card"><h3>A script you can read</h3><p><a href="/vuln_feed.py">vuln_feed.py</a> fetches and deduplicates. Python standard library only, about 500 lines, tested offline.</p></div>
+      <div class="card"><h3>A script you can read</h3><p><a href="vuln_feed.py">vuln_feed.py</a> fetches and deduplicates. Python standard library only, about 500 lines, tested offline.</p></div>
       <div class="card"><h3>Says when it breaks</h3><p>A source that did not answer is named in the digest. A lost state is rebuilt from the last date, not resent.</p></div>
     </div>
   </div>
@@ -235,25 +235,25 @@
 <footer class="bottom">
   <div class="wrap foot-grid">
     <div>
-      <p class="brand small"><img src="/favicon.svg" width="20" height="20" alt=""> vuln-digest</p>
+      <p class="brand small"><img src="favicon.svg" width="20" height="20" alt=""> vuln-digest</p>
       <p class="muted">Instructions for AI assistants. From the author of <a href="https://harden-ci.secmy.app/">harden-ci</a>.</p>
     </div>
     <div>
       <p class="foot-h">For AI assistants</p>
       <ul>
-        <li><a href="/README.md">README.md</a> - the instructions</li>
-        <li><a href="/llms.txt">llms.txt</a></li>
-        <li><a href="/llms-full.txt">llms-full.txt</a></li>
-        <li><a href="/vuln_feed.py">vuln_feed.py</a> - helper script</li>
+        <li><a href="README.md">README.md</a> - the instructions</li>
+        <li><a href="llms.txt">llms.txt</a></li>
+        <li><a href="llms-full.txt">llms-full.txt</a></li>
+        <li><a href="vuln_feed.py">vuln_feed.py</a> - helper script</li>
       </ul>
     </div>
     <div>
       <p class="foot-h">Project</p>
       <ul>
-        <li><a href="/docs/">Instructions as a page</a></li>
+        <li><a href="docs/">Instructions as a page</a></li>
         <li><a href="https://github.com/SecH0us3/vuln-digest">Source on GitHub</a></li>
         <li><a href="https://github.com/SecH0us3/vuln-digest/issues/new">Report a problem</a></li>
-        <li><a href="/AGENTS.md">AGENTS.md</a> - for contributors</li>
+        <li><a href="AGENTS.md">AGENTS.md</a> - for contributors</li>
       </ul>
     </div>
   </div>

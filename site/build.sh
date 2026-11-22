@@ -1,6 +1,7 @@
 #!/bin/sh
 # Builds the site into _site/. Run from the repository root: sh site/build.sh
-# Needs Docker with a running daemon.
+# Needs Docker with a running daemon. Every other page uses relative links, so the
+# site works both on its own domain and under a path such as /vuln-digest/.
 set -eu
 
 PANDOC_IMAGE='pandoc/core:3.11.0@sha256:62518bfb6833705dc90a1634d8d879299bd820b3f74ad3b32fba8b618452553a'
@@ -10,7 +11,9 @@ mkdir -p _site/docs
 # The landing page for people. Hand-written HTML, published as it is
 cp site/landing.html _site/index.html
 cp site/landing.css _site/landing.css
-cp site/404.html _site/404.html
+# GitHub Pages serves 404.html at any depth, so its links stay absolute. BASE_PATH is
+# the path the site is served under: empty on its own domain, /vuln-digest on github.io
+sed "s#=\"/#=\"${BASE_PATH:-}/#g" site/404.html > _site/404.html
 
 # The instructions rendered for people, at /docs/
 docker run --rm \
@@ -23,7 +26,7 @@ docker run --rm \
   --lua-filter site/toc.lua \
   --metadata pagetitle="vuln-digest - scheduled vulnerability reports for AI agents" \
   --metadata lang=en \
-  --css /style.css \
+  --css ../style.css \
   --include-in-header site/head.html \
   --include-after-body site/footer.html \
   --output /out/docs/index.html \

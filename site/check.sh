@@ -13,8 +13,8 @@ fail() { echo "check failed: $1" >&2; exit 1; }
 cmp -s site/landing.html "$LANDING" || fail 'index.html differs from site/landing.html'
 [ "$(grep -c '<h1' "$LANDING")" = 1 ] || fail 'the landing page must have exactly one h1'
 [ "$(grep -cF "$PROMPT" "$LANDING")" = 2 ] || fail 'the landing page must show the start prompt twice, exactly as in check.sh'
-grep -qF 'href="/README.md"' "$LANDING" || fail 'the landing page does not link the instructions for AI'
-grep -qF 'href="/docs/"' "$LANDING" || fail 'the landing page does not link the instructions page'
+grep -qF 'href="README.md"' "$LANDING" || fail 'the landing page does not link the instructions for AI'
+grep -qF 'href="docs/"' "$LANDING" || fail 'the landing page does not link the instructions page'
 grep -qF 'href="https://github.com/SecH0us3/vuln-digest"' "$LANDING" || fail 'the landing page does not link the repository'
 grep -q '<meta name="description" content="..*">' "$LANDING" || fail 'landing: no meta description'
 grep -qF "<link rel=\"canonical\" href=\"${SITE}\">" "$LANDING" || fail 'landing: no canonical link'
@@ -23,13 +23,22 @@ grep -q '<meta name="viewport"' "$LANDING" || fail 'landing: no viewport meta'
 if grep -q '<script[^>]*src=' "$LANDING"; then fail 'landing: external scripts are not allowed'; fi
 if grep -qiE '(href|src)="http://' "$LANDING" _site/404.html; then fail 'plain http link'; fi
 
+# Pages other than 404.html use relative links only, so the site works under any path
+if grep -qE '(href|src)="/' "$LANDING" "$DOCS"; then fail 'use relative links: the site may be served under a path'; fi
+
 # Every site-local link of the landing and 404 pages exists in the build
-for path in $(grep -ohE '(href|src)="/[^"#]*"' "$LANDING" _site/404.html | sed -E 's/^(href|src)="//; s/"$//' | sort -u); do
-  case "$path" in
-    */) file="_site${path}index.html" ;;
-    *) file="_site${path}" ;;
+check_link() { # $1: path relative to _site
+  case "$1" in
+    ''|*/) file="_site/${1}index.html" ;;
+    *) file="_site/$1" ;;
   esac
-  [ -f "$file" ] || fail "linked file is not in the build: $path"
+  [ -f "$file" ] || fail "linked file is not in the build: $1"
+}
+for path in $(grep -ohE '(href|src)="[^"#:]*"' "$LANDING" | sed -E 's/^(href|src)="//; s/"$//; s#^\./##' | sort -u); do
+  check_link "$path"
+done
+for path in $(grep -ohE '(href|src)="/[^"#]*"' _site/404.html | sed -E 's/^(href|src)="//; s/"$//' | sort -u); do
+  check_link "${path#"${BASE_PATH:-}"/}"
 done
 
 # Every in-page anchor of the landing page has a target
@@ -37,7 +46,7 @@ for id in $(grep -oE 'href="#[^"]+"' "$LANDING" | sed -E 's/href="#//; s/"$//' |
   grep -qE "id=\"$id\"" "$LANDING" || fail "anchor without target: #$id"
 done
 
-# The helper script size claim on the landing page stays true (about 400 lines)
+# The helper script size claim on the landing page stays true (about 500 lines)
 lines="$(wc -l < tools/vuln_feed.py)"
 [ "$lines" -ge 420 ] && [ "$lines" -le 620 ] || fail "vuln_feed.py has $lines lines: update the landing page text"
 
@@ -52,8 +61,8 @@ if echo "$toc" | grep -q 'scheduled vulnerability reports'; then fail 'table of 
 grep -q '<meta name="description" content="..*">' "$DOCS" || fail 'docs: no meta description'
 grep -qF "<link rel=\"canonical\" href=\"${SITE}docs/\">" "$DOCS" || fail 'docs: no canonical link'
 grep -qF "<meta property=\"og:image\" content=\"${SITE}social-preview.png\">" "$DOCS" || fail 'docs: no og:image'
-grep -qF 'href="/style.css"' "$DOCS" || fail 'docs: stylesheet path must be absolute'
-grep -qF 'href="/"' "$DOCS" || fail 'docs: no link back to the landing page'
+grep -qF 'href="../style.css"' "$DOCS" || fail 'docs: no stylesheet link'
+grep -qF 'href="../"' "$DOCS" || fail 'docs: no link back to the landing page'
 
 # --- Icons and the preview image ---
 for f in favicon.svg favicon-32.png apple-touch-icon.png social-preview.png style.css landing.css 404.html; do

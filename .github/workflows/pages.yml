@@ -24,10 +24,16 @@ jobs:
       - name: Test the helper script
         run: python3 -I -m unittest discover -s tools/tests
 
+      # The path the site is served under. Set it to an empty string once the
+      # custom domain vuln-digest.secmy.app is set in the Pages settings
       - name: Build the site
+        env:
+          BASE_PATH: /vuln-digest
         run: sh site/build.sh
 
       - name: Check the built site
+        env:
+          BASE_PATH: /vuln-digest
         run: sh site/check.sh
 
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
