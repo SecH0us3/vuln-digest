@@ -128,6 +128,7 @@ td:first-child { width: 3.2rem; text-align: center; white-space: nowrap; }
 .faq details { border-bottom: 1px solid var(--border); padding: 0.9rem 0; max-width: 52rem; }
 .faq summary { cursor: pointer; font-weight: 600; }
 .faq details p { color: var(--muted); margin: 0.6rem 0 0; }
+.faq code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code-bg); color: var(--fg); padding: 0.1em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
 
 .final { text-align: left; }
 

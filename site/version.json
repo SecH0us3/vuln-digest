@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-11-22",
+      "summary": "First release: sources Cloudflare Radar Zero Wire, CISA KEV, OSV and vendor feeds, EPSS scores, weekly summary, urgent alerts, update check"
+    }
+  ]
+}

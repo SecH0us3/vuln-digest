@@ -47,6 +47,8 @@ cp site/llms.txt _site/llms.txt
 cp site/robots.txt _site/robots.txt
 cp site/ai.txt _site/ai.txt
 cp site/sitemap.xml _site/sitemap.xml
+# The current version of the instructions, read by running jobs once a week
+cp site/version.json _site/version.json
 
 # The helper script, so agents can download it next to the instructions
 cp tools/vuln_feed.py _site/vuln_feed.py
