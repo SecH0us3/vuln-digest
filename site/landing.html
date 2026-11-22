@@ -109,28 +109,28 @@
 <section id="example" class="block alt">
   <div class="wrap">
     <h2>What a digest looks like</h2>
-    <p class="sub">An example for someone who runs Kubernetes with ingress-nginx, Java services, .NET and Google Cloud. Your digest comes in your language and in the channel you choose.</p>
+    <p class="sub">An example for someone who runs Kubernetes with ingress-nginx, a PHP site, Java services, .NET and Google Cloud. Your digest comes in your language and in the channel you choose.</p>
 
     <article class="digest" aria-label="Example digest">
       <header>
         <h3>Vulnerability digest - 21 November 2026</h3>
-        <p class="meta">Sources: Zero Wire, CISA KEV · 4 new, 1 update · 2 in your focus</p>
+        <p class="meta">Sources: Zero Wire, CISA KEV · 4 new, 1 update · 3 in your focus</p>
       </header>
       <div class="table-scroll">
         <table>
           <thead><tr><th></th><th>What</th><th>CVE</th><th>Exploited</th><th>What to do</th></tr></thead>
           <tbody>
+            <tr><td title="urgent">🔴</td><td>PHP - php2shell exploited, plus 7 new critical bugs</td><td>CVE-2026-109618 +8</td><td><strong>yes</strong>, CISA KEV</td><td>update to 8.4.28 today</td></tr>
             <tr><td title="high">🟠</td><td>nginx2root - RCE in nginx HTTP/2</td><td>CVE-2026-123007 +4</td><td>no</td><td>update to 1.30.7 / 1.31.9</td></tr>
             <tr><td title="normal, update">🟡&nbsp;🔄</td><td>Java4Shell - WAF rules added</td><td>CVE-2026-114938</td><td>no</td><td>no change, the update is still the fix</td></tr>
-            <tr><td title="info">⚪</td><td>ruby2shell, WordPress, PHP</td><td>3 items</td><td>no</td><td>see below</td></tr>
+            <tr><td title="info">⚪</td><td>ruby2shell, WordPress</td><td>2 items</td><td>no</td><td>see below</td></tr>
           </tbody>
         </table>
       </div>
-      <p><strong>Main thing today.</strong> nginx2root reaches your ingress controllers: memory corruption in nginx workers through HTTP/2, demonstrated on cloud endpoints. Update the controller to a release with nginx 1.30.7 or later.</p>
+      <p><strong>Main thing today.</strong> php2shell (CVE-2026-109618, CVE-2026-109619) is exploited in the wild and listed in CISA KEV. The PHP releases of 19 November fix it together with seven new critical bugs, so update your PHP site to 8.4.28 first. Then update the ingress controller for nginx2root.</p>
       <h4>Outside your stack</h4>
       <ul>
         <li>WordPress 7.1.5 - privilege escalation in Template Part, update the core</li>
-        <li>PHP - 7 critical bugs, update to 8.4.28</li>
         <li>ruby2shell - heap overflow in Ruby string case mapping, PoC expected this week</li>
       </ul>
       <p class="meta">Nothing new for: .NET, Google Cloud</p>

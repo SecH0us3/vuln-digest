@@ -293,21 +293,29 @@ The daily digest keeps its own state, so it still shows the item in full the nex
 ```markdown
 # Vulnerability digest - 21 November 2026
 
-Sources: Zero Wire, CISA KEV · 4 new, 1 update · 2 in your focus
+Sources: Zero Wire, CISA KEV · 4 new, 1 update · 3 in your focus
 
 | | What | CVE | Score | Exploited | What to do |
 |---|---|---|---|---|---|
+| 🔴 | PHP - php2shell exploited, plus 7 new critical bugs (phpAfterShell) | CVE-2026-109618 +8 | CVSS 9.2 | **yes**, CISA KEV since 26 October | update to 8.4.28 today |
 | 🟠 | nginx2root - RCE in nginx HTTP/2 | CVE-2026-123007 +4 | CVSS 9.2 · EPSS 3% | no | update to 1.30.7 / 1.31.9 |
 | 🟡 🔄 | Java4Shell - WAF rules added | CVE-2026-114938 | 8.1 | no | no change, the update is still the fix |
 | ⚪ | ruby2shell - heap overflow in Ruby | CVE-2026-132825 | critical | no, PoC expected | update Ruby |
 | ⚪ | WordPress 7.1.5 - Template Part | no CVE yet | high | no | update the core |
-| ⚪ | PHP - 7 critical bugs | CVE-2026-126714 +6 | CVSS 9.2 | no | update to 8.4.28 |
 
 **Main thing today.** One or two sentences: the single item that matters most for this user and why
 
 ## In your focus
 
-### 1. nginx2root - RCE in nginx HTTP/2, HTTP/3 and the resolver
+### 1. PHP - php2shell is exploited, the 19 November releases fix it and 7 more critical bugs
+*19 November · [source](https://...) · php*
+
+- **Affected:** 8.2 before 8.2.36, 8.3 before 8.3.37, 8.4 before 8.4.28, 8.5 before 8.5.13
+- **What it is:** php2shell (CVE-2026-109618, CVE-2026-109619) gives remote code execution. The same releases fix phpAfterShell: session file corruption leading to unserialize, FastCGI request smuggling in PHP-FPM, use-after-free bugs
+- **Exploited:** yes, php2shell is in CISA KEV since 26 October. phpAfterShell: not seen in the wild
+- **What to do:** update PHP today. Check with `php -v`
+
+### 2. nginx2root - RCE in nginx HTTP/2, HTTP/3 and the resolver
 *18 November · [source](https://...) · ingress-nginx, k8s*
 
 - **Affected:** versions, and whether the user's version is affected
@@ -315,14 +323,13 @@ Sources: Zero Wire, CISA KEV · 4 new, 1 update · 2 in your focus
 - **Exploited:** no / yes (CISA KEV since date) / public PoC
 - **What to do:** the action, and the command to check
 
-### 2. 🔄 Java4Shell - update of 20 November
+### 3. 🔄 Java4Shell - update of 20 November
 Only the new update, in one or two lines, and a link to the earlier digest
 
 ## Outside your stack
 
 - ruby2shell - heap overflow in Ruby string case mapping, a public PoC is expected this week · [source](https://...)
 - WordPress 7.1.5 - privilege escalation in Template Part, update the core · [source](https://...)
-- PHP - 7 critical bugs, update to 8.4.28 · [source](https://...)
 
 Nothing new for: .NET, Chrome, Google Cloud
 
