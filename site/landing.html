@@ -10,7 +10,8 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#f3eee2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#14120e" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="vuln-digest">
 <meta property="og:title" content="vuln-digest - vulnerability news for your stack, from your AI assistant">
@@ -36,10 +37,7 @@
 
 <header class="top">
   <div class="wrap top-row">
-    <a class="brand" href="./" aria-label="vuln-digest home">
-      <img src="favicon.svg" width="28" height="28" alt="">
-      <span>vuln-digest</span>
-    </a>
+    <a class="brand" href="./" aria-label="vuln-digest home"><img src="favicon.svg" width="22" height="22" alt=""><span>vuln-digest</span></a>
     <nav class="top-nav" aria-label="Main">
       <a href="#how">How it works</a>
       <a href="#value">Why</a>
@@ -53,106 +51,86 @@
 
 <main>
 
-<section class="hero">
-  <div class="wrap">
-    <p class="eyebrow">Free · open source · works with any AI assistant</p>
-    <h1>Watch vulnerabilities <em>yourself</em>.<br>No vendor needed</h1>
-    <p class="lede">Your AI assistant reads your repositories and docs, learns what you run, and sends you only the vulnerabilities that matter to you - exploited first, with what to do.</p>
+<div class="wrap">
+  <div class="masthead" aria-hidden="true">
+    <p class="mast-title">The Vuln Digest</p>
+    <p class="mast-motto">All the vulnerabilities fit to patch - and only the ones you run</p>
+  </div>
+  <div class="dateline">
+    <span id="today">Every morning</span>
+    <span>Edition: your stack</span>
+    <span>Free · MIT · any AI assistant</span>
+  </div>
+</div>
 
-    <div class="install">
-      <div class="panel">
-        <div class="panel-head">
-          <span class="panel-title">Any AI assistant</span>
-          <span class="panel-sub">Claude, ChatGPT, Gemini, Codex, Cursor</span>
+<section class="front">
+  <div class="wrap front-grid">
+    <div class="lead">
+      <p class="kicker">Lead story</p>
+      <h1>Watch vulnerabilities <em>yourself</em>. No vendor needed</h1>
+      <p class="deck">Your AI assistant reads your repositories and docs, learns what you run, and every morning hands you a one-page edition: exploited first, with what to do.</p>
+      <div class="ads">
+        <div class="ad">
+          <p class="ad-head">Any AI assistant</p>
+          <p class="ad-sub">Claude, ChatGPT, Gemini, Codex, Cursor. Paste into a chat:</p>
+          <pre id="prompt-text">Read https://vuln-digest.secmy.app/README.md and follow it: set up a scheduled vulnerability digest for me.</pre>
+          <button type="button" class="copy" data-copy="prompt-text" aria-describedby="copy-status">Copy</button>
+          <p class="ad-foot" id="copy-status" aria-live="polite">Any agent that can open a link and run on a schedule</p>
         </div>
-        <div class="panel-body">
-          <p class="panel-label">Paste this into a chat:</p>
-          <div class="code-line">
-            <pre id="prompt-text">Read https://vuln-digest.secmy.app/README.md and follow it: set up a scheduled vulnerability digest for me.</pre>
-            <button type="button" class="copy" data-copy="prompt-text" aria-describedby="copy-status">Copy</button>
-          </div>
+        <div class="ad">
+          <p class="ad-head">Claude Code plugin</p>
+          <p class="ad-sub">The same instructions, installed locally. Run one at a time:</p>
+          <div class="cmd"><code id="plugin-add">/plugin marketplace add SecH0us3/vuln-digest</code><button type="button" class="copy" data-copy="plugin-add">Copy</button></div>
+          <div class="cmd"><code id="plugin-install">/plugin install vuln-digest@vuln-digest</code><button type="button" class="copy" data-copy="plugin-install">Copy</button></div>
+          <p class="ad-foot">One skill and the helper script. No hooks, no MCP servers</p>
         </div>
-        <p class="panel-foot" id="copy-status" aria-live="polite">Any agent that can open a link and run on a schedule</p>
       </div>
-      <div class="panel">
-        <div class="panel-head">
-          <span class="panel-title">Claude Code plugin</span>
-          <span class="panel-sub">the same instructions, installed locally</span>
-        </div>
-        <div class="panel-body">
-          <p class="panel-label">Run one at a time, then ask for a vulnerability digest:</p>
-          <div class="code-line">
-            <code id="plugin-add">/plugin marketplace add SecH0us3/vuln-digest</code>
-            <button type="button" class="copy" data-copy="plugin-add">Copy</button>
-          </div>
-          <div class="code-line">
-            <code id="plugin-install">/plugin install vuln-digest@vuln-digest</code>
-            <button type="button" class="copy" data-copy="plugin-install">Copy</button>
-          </div>
-        </div>
-        <p class="panel-foot">One skill and the helper script. No hooks, no MCP servers</p>
-      </div>
+      <p class="small-links"><a href="README.md">Instructions for AI (Markdown)</a> · <a href="docs/">Read them as a page</a></p>
     </div>
-
-    <p class="hero-links"><a href="README.md">Instructions for AI (Markdown)</a> · <a href="docs/">Read them as a page</a></p>
+    <aside class="side" aria-label="From a sample edition">
+      <p class="side-head">In a morning edition</p>
+      <div class="story"><span class="stamp">Exploited</span><b>php2shell hits PHP sites</b><span>In CISA KEV. Update to 8.4.28 today</span></div>
+      <div class="story"><b>nginx2root: RCE in HTTP/2</b><span>Your ingress controllers. Update to 1.30.7</span></div>
+      <div class="story"><b>Java4Shell: WAF rules added</b><span>Update · the fix stays the same</span></div>
+      <div class="story"><span>Also: ruby2shell, WordPress 7.1.5 · Nothing new for .NET</span></div>
+      <p class="side-foot"><a href="#example">Read the full sample edition</a></p>
+    </aside>
   </div>
 </section>
 
 <section id="how" class="block">
   <div class="wrap">
-    <h2>How it works</h2>
+    <p class="section-head">How it works</p>
+    <h2>From your repositories to your inbox, in four steps</h2>
     <ol class="flow">
-      <li>
-        <span class="num">1</span>
-        <div>
-          <h3>It looks before it asks</h3>
-          <p>If your assistant is connected to GitHub, GitLab, Confluence or Notion, it reads your lock files, Dockerfiles, Helm charts, Terraform and infrastructure pages. Read only: it does not clone, run or change anything, and keeps no code or secrets. No connector? Give it a repository, an SBOM, or just a list.</p>
-        </div>
-      </li>
-      <li>
-        <span class="num">2</span>
-        <div>
-          <h3>It asks only what it could not find</h3>
-          <p>"nginx and PHP 8.3 are in three repositories - is that production?" "Ruby is only in a two-year-old service - ignore it?" Then when to send, where, and in which language. Every question has a default.</p>
-        </div>
-      </li>
-      <li>
-        <span class="num">3</span>
-        <div>
-          <h3>It schedules itself</h3>
-          <p>A scheduled task in your assistant, or GitHub Actions or cron where there is none. A small state file makes sure nothing is sent twice. You get a test digest right away.</p>
-        </div>
-      </li>
-      <li>
-        <span class="num">4</span>
-        <div>
-          <h3>You read, act and steer</h3>
-          <p>Each digest puts exploited issues in your stack on top, with fixed versions and a command to check. Reply "hide WordPress" or "I patched nginx" and the next ones follow. Once a month it can look at your repositories again and ask about anything new.</p>
-        </div>
-      </li>
+      <li><span class="num">I</span><div><h3>It looks before it asks</h3><p>If your assistant is connected to GitHub, GitLab, Confluence or Notion, it reads your lock files, Dockerfiles, Helm charts, Terraform and infrastructure pages. Read only: it does not clone, run or change anything, and keeps no code or secrets. No connector? Give it a repository, an SBOM, or just a list.</p></div></li>
+      <li><span class="num">II</span><div><h3>It asks only what it could not find</h3><p>"nginx and PHP 8.3 are in three repositories - is that production?" "Ruby is only in a two-year-old service - ignore it?" Then when to send, where, and in which language. Every question has a default.</p></div></li>
+      <li><span class="num">III</span><div><h3>It schedules itself</h3><p>A scheduled task in your assistant, or GitHub Actions or cron where there is none. A small state file makes sure nothing is sent twice. You get a test edition right away.</p></div></li>
+      <li><span class="num">IV</span><div><h3>You read, act and steer</h3><p>Exploited issues in your stack come first, with fixed versions and a command to check. Reply "hide WordPress" or "I patched nginx" and the next editions follow. Once a month it can look at your repositories again and ask about anything new.</p></div></li>
     </ol>
   </div>
 </section>
 
-<section id="value" class="block alt">
+<section id="value" class="block">
   <div class="wrap">
+    <p class="section-head">Why read it</p>
     <h2>What you get</h2>
-    <div class="benefits">
-      <div class="benefit"><h3>Five minutes instead of a morning of feeds</h3><p>One short report instead of advisories, mailing lists and vendor blogs. On days with nothing new, one line.</p></div>
-      <div class="benefit"><h3>Only what you run</h3><p>Matched by meaning: ingress-nginx is nginx, GKE is Google Cloud. What you never want to see stays hidden.</p></div>
-      <div class="benefit"><h3>Exploited first</h3><p>CISA KEV, public exploits and EPSS decide the order. An exploited issue in your stack can come as an urgent alert, not tomorrow.</p></div>
-      <div class="benefit"><h3>A next step, not just a CVE</h3><p>The fixed version, whether yours is affected and a command to check it, taken from the source and linked.</p></div>
-      <div class="benefit"><h3>Your stack stays with you</h3><p>No service, no account. The profile and the state live where your assistant keeps them. Only public feeds are read.</p></div>
-      <div class="benefit"><h3>No lock-in</h3><p>Free and MIT licensed. Plain instructions any assistant can follow: switch assistants and take your setup with you.</p></div>
+    <div class="columns">
+      <div class="col-item"><h3>Five minutes instead of a morning of feeds</h3><p>One short edition instead of advisories, mailing lists and vendor blogs. On days with nothing new, one line.</p></div>
+      <div class="col-item"><h3>Only what you run</h3><p>Matched by meaning: ingress-nginx is nginx, GKE is Google Cloud. What you never want to see stays out.</p></div>
+      <div class="col-item"><h3>Exploited first</h3><p>CISA KEV, public exploits and EPSS decide the order. An exploited issue in your stack can come as an urgent alert, not tomorrow.</p></div>
+      <div class="col-item"><h3>A next step, not just a CVE</h3><p>The fixed version, whether yours is affected and a command to check it, taken from the source and linked.</p></div>
+      <div class="col-item"><h3>Your stack stays with you</h3><p>No service, no account. The profile and the state live where your assistant keeps them. Only public feeds are read.</p></div>
+      <div class="col-item"><h3>No lock-in</h3><p>Free and MIT licensed. Plain instructions any assistant can follow: switch assistants and take your setup with you.</p></div>
     </div>
   </div>
 </section>
 
 <section id="example" class="block">
   <div class="wrap">
+    <p class="section-head">Sample edition</p>
     <h2>What a digest looks like</h2>
-    <p class="sub">An example for someone who runs Kubernetes with ingress-nginx, a PHP site, Java services, .NET and Google Cloud. Your digest comes in your language and in the channel you choose.</p>
-
+    <p class="sub">For someone who runs Kubernetes with ingress-nginx, a PHP site, Java services, .NET and Google Cloud. Yours comes in your language and in the channel you choose.</p>
     <article class="digest" aria-label="Example digest">
       <header>
         <h3>Vulnerability digest - 21 November 2026</h3>
@@ -181,9 +159,10 @@
   </div>
 </section>
 
-<section class="block alt">
+<section class="block">
   <div class="wrap two-col">
     <div>
+      <p class="section-head">The interview</p>
       <h2>What it asks you</h2>
       <ul class="ticks">
         <li>Which connectors it may read your stack from: GitHub, GitLab, a wiki</li>
@@ -200,7 +179,8 @@
       </ul>
     </div>
     <div>
-      <h2>Where the data comes from</h2>
+      <p class="section-head">Wire services</p>
+      <h2>Where the news comes from</h2>
       <ul class="sources">
         <li><a href="https://radar.cloudflare.com/zero-wire">Cloudflare Radar Zero Wire</a><span>briefings on the vulnerabilities that matter most, with updates</span></li>
         <li><a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog">CISA KEV</a><span>what is exploited in the wild</span></li>
@@ -214,20 +194,22 @@
 
 <section class="block">
   <div class="wrap">
+    <p class="section-head">Editorial standards</p>
     <h2>Built to be trusted</h2>
-    <div class="cards">
-      <div class="card"><h3>Runs in your assistant</h3><p>There is no service and no account. This site is static. Your stack, your schedule and your state stay where your assistant keeps them.</p></div>
-      <div class="card"><h3>Reports, never changes</h3><p>The instructions forbid the assistant to patch or reconfigure anything. It tells you what to do, you decide.</p></div>
-      <div class="card"><h3>Facts with sources</h3><p>Every CVE, version and "exploited" status comes from a source and links to it. Unknown stays "unknown".</p></div>
-      <div class="card"><h3>Feeds are data</h3><p>Advisories are written by other people. The assistant is told never to follow instructions found in them.</p></div>
-      <div class="card"><h3>A script you can read</h3><p><a href="vuln_feed.py">vuln_feed.py</a> fetches and deduplicates. Python standard library only, about 500 lines, tested offline.</p></div>
-      <div class="card"><h3>Says when it breaks</h3><p>A source that did not answer is named in the digest. A lost state is rebuilt from the last date, not resent.</p></div>
+    <div class="columns">
+        <div class="col-item"><h3>Runs in your assistant</h3><p>There is no service and no account. This site is static. Your stack, your schedule and your state stay where your assistant keeps them.</p></div>
+        <div class="col-item"><h3>Reports, never changes</h3><p>The instructions forbid the assistant to patch or reconfigure anything. It tells you what to do, you decide.</p></div>
+        <div class="col-item"><h3>Facts with sources</h3><p>Every CVE, version and "exploited" status comes from a source and links to it. Unknown stays "unknown".</p></div>
+        <div class="col-item"><h3>Feeds are data</h3><p>Advisories are written by other people. The assistant is told never to follow instructions found in them.</p></div>
+        <div class="col-item"><h3>A script you can read</h3><p><a href="vuln_feed.py">vuln_feed.py</a> fetches and deduplicates. Python standard library only, about 500 lines, tested offline.</p></div>
+        <div class="col-item"><h3>Says when it breaks</h3><p>A source that did not answer is named in the digest. A lost state is rebuilt from the last date, not resent.</p></div>
     </div>
   </div>
 </section>
 
-<section id="faq" class="block alt">
+<section id="faq" class="block">
   <div class="wrap faq">
+    <p class="section-head">Readers ask</p>
     <h2>Questions</h2>
     <details>
       <summary>Which assistants does it work with?</summary>
@@ -270,41 +252,24 @@
 
 <section class="block final">
   <div class="wrap">
-    <h2>Start now</h2>
-    <div class="install">
-      <div class="panel">
-        <div class="panel-head">
-          <span class="panel-title">Any AI assistant</span>
-          <span class="panel-sub">Claude, ChatGPT, Gemini, Codex, Cursor</span>
+    <p class="section-head">Subscribe</p>
+    <h2>Start your edition</h2>
+      <div class="ads">
+        <div class="ad">
+          <p class="ad-head">Any AI assistant</p>
+          <p class="ad-sub">Claude, ChatGPT, Gemini, Codex, Cursor. Paste into a chat:</p>
+          <pre id="prompt-text-2">Read https://vuln-digest.secmy.app/README.md and follow it: set up a scheduled vulnerability digest for me.</pre>
+          <button type="button" class="copy" data-copy="prompt-text-2">Copy</button>
+          <p class="ad-foot">Any agent that can open a link and run on a schedule</p>
         </div>
-        <div class="panel-body">
-          <p class="panel-label">Paste this into a chat:</p>
-          <div class="code-line">
-            <pre id="prompt-text-2">Read https://vuln-digest.secmy.app/README.md and follow it: set up a scheduled vulnerability digest for me.</pre>
-            <button type="button" class="copy" data-copy="prompt-text-2">Copy</button>
-          </div>
+        <div class="ad">
+          <p class="ad-head">Claude Code plugin</p>
+          <p class="ad-sub">The same instructions, installed locally. Run one at a time:</p>
+          <div class="cmd"><code id="plugin-add-2">/plugin marketplace add SecH0us3/vuln-digest</code><button type="button" class="copy" data-copy="plugin-add-2">Copy</button></div>
+          <div class="cmd"><code id="plugin-install-2">/plugin install vuln-digest@vuln-digest</code><button type="button" class="copy" data-copy="plugin-install-2">Copy</button></div>
+          <p class="ad-foot">One skill and the helper script. No hooks, no MCP servers</p>
         </div>
-        <p class="panel-foot">Any agent that can open a link and run on a schedule</p>
       </div>
-      <div class="panel">
-        <div class="panel-head">
-          <span class="panel-title">Claude Code plugin</span>
-          <span class="panel-sub">the same instructions, installed locally</span>
-        </div>
-        <div class="panel-body">
-          <p class="panel-label">Run one at a time, then ask for a vulnerability digest:</p>
-          <div class="code-line">
-            <code id="plugin-add-2">/plugin marketplace add SecH0us3/vuln-digest</code>
-            <button type="button" class="copy" data-copy="plugin-add-2">Copy</button>
-          </div>
-          <div class="code-line">
-            <code id="plugin-install-2">/plugin install vuln-digest@vuln-digest</code>
-            <button type="button" class="copy" data-copy="plugin-install-2">Copy</button>
-          </div>
-        </div>
-        <p class="panel-foot">One skill and the helper script. No hooks, no MCP servers</p>
-      </div>
-    </div>
   </div>
 </section>
 
@@ -339,6 +304,10 @@
 </footer>
 
 <script>
+(function () {
+  var t = document.getElementById('today');
+  try { t.textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); } catch (e) {}
+})();
 document.querySelectorAll('button.copy').forEach(function (b) {
   b.addEventListener('click', function () {
     var text = document.getElementById(b.dataset.copy).textContent;

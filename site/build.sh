@@ -11,6 +11,8 @@ mkdir -p _site/docs
 # The landing page for people. Hand-written HTML, published as it is
 cp site/landing.html _site/index.html
 cp site/landing.css _site/landing.css
+mkdir -p _site/fonts
+cp site/fonts/*.woff2 site/fonts/OFL-* _site/fonts/
 # GitHub Pages serves 404.html at any depth, so its links stay absolute. BASE_PATH is
 # the path the site is served under: empty on its own domain, /vuln-digest on github.io
 sed "s#=\"/#=\"${BASE_PATH:-}/#g" site/404.html > _site/404.html
