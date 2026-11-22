@@ -66,6 +66,11 @@ h1 em { font-style: normal; color: var(--accent); }
 .prompt pre { margin: 0; padding: 1rem; font: 0.95rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; background: var(--code-bg); }
 .prompt-foot { margin: 0; padding: 0.6rem 1rem; font-size: 0.85rem; color: var(--muted); border-top: 1px solid var(--border); }
 .copy { font: inherit; font-weight: 600; font-size: 0.85rem; padding: 0.35rem 0.9rem; border-radius: 8px; border: 1px solid var(--accent-strong); background: var(--accent-strong); color: var(--on-accent); cursor: pointer; min-width: 5.5rem; }
+.prompt.plugin { margin-top: 1rem; }
+.cmd-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.75rem 0.6rem 1rem; background: var(--code-bg); }
+.cmd-row + .cmd-row { border-top: 1px solid var(--border); }
+.cmd-row code { flex: 1; min-width: 0; font: 0.95rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.cmd-step { flex: none; width: 1.5rem; height: 1.5rem; border-radius: 50%; border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
 .copy:hover { filter: brightness(1.08); }
 .copy:focus-visible, .btn:focus-visible, summary:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 
