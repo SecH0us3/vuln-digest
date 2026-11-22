@@ -42,6 +42,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
@@ -60,19 +61,28 @@ STATE_VERSION = 3
 
 
 def fp(*parts):
-    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+    # an identifier for deduplication, not a security control
+    return hashlib.sha1("|".join(parts).encode(), usedforsecurity=False).hexdigest()[:16]
 
 
+def web_url(url):
+    """Only http and https go to urlopen. Other schemes, such as file: or ftp:, are refused"""
+    if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        raise ValueError(f"not an http(s) URL: {url!r}")
+    return url
+
+
+# S310: urlopen gets only URLs that web_url() checked
 def http_get(url, timeout=60):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    req = urllib.request.Request(web_url(url), headers={"User-Agent": UA})  # noqa: S310
+    with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
         return r.read()
 
 
 def http_post_json(url, obj, timeout=60):
-    req = urllib.request.Request(url, data=json.dumps(obj).encode(), method="POST",
+    req = urllib.request.Request(web_url(url), data=json.dumps(obj).encode(), method="POST",  # noqa: S310
                                  headers={"User-Agent": UA, "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
         return json.loads(r.read())
 
 
@@ -99,17 +109,19 @@ def zerowire_updates(content):
     return out
 
 
+# S314: xml.etree does not load external entities or DTDs, and expat 2.4.1 or later limits
+# entity expansion, so feed XML from the network is safe to parse here
 def rss_items(raw):
     """<item> elements of an RSS feed. A feed cut off in transfer still gives its complete items"""
     try:
-        return list(ET.fromstring(raw).iter("item")), None
+        return list(ET.fromstring(raw).iter("item")), None  # noqa: S314
     except ET.ParseError as e:
         text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
         ns = " ".join(re.findall(r'xmlns:\w+="[^"]*"', text[:2000]))
         items = []
         for block in re.findall(r"<item\b.*?</item>", text, re.S):
             try:
-                items.append(ET.fromstring(f"<rss {ns}>{block}</rss>").find("item"))
+                items.append(ET.fromstring(f"<rss {ns}>{block}</rss>").find("item"))  # noqa: S314
             except ET.ParseError:
                 continue
         if not items:
@@ -132,7 +144,7 @@ def parse_zerowire(raw, warnings=None):
         updates = zerowire_updates(content)
         if not updates:  # "legacy": the prototype fingerprinted such items by guid
             updates = [{"date": date, "text": "published", "id": fp("published", slug),
-                        "legacy": hashlib.sha1(guid.encode()).hexdigest()[:16]}]
+                        "legacy": hashlib.sha1(guid.encode(), usedforsecurity=False).hexdigest()[:16]}]
         items.append({
             "key": f"zerowire:{slug}",
             "source": "zerowire",
@@ -179,7 +191,8 @@ def feed_date(text):
 def parse_vendor_feed(name, raw):
     """Each entry is one item with one update. Its key is the feed name plus the entry link or id"""
     try:
-        root = ET.fromstring(raw)
+        # S314: safe for the same reason as in rss_items
+        root = ET.fromstring(raw)  # noqa: S314
         entries = list(root.iter("item")) or list(root.iter(ATOM + "entry"))
     except ET.ParseError:
         entries, _ = rss_items(raw)

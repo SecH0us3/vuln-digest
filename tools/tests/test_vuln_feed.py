@@ -201,6 +201,15 @@ class VulnFeedTest(unittest.TestCase):
         dotnet = next(i for i in allout["items"] if i["source"] == "feeds:dotnet")
         self.assertEqual((dotnet["date"], dotnet["link"]), ("2026-11-10", "https://github.com/dotnet/announcements/issues/504"))
 
+    def test_feed_url_must_be_http(self):
+        feeds = os.path.join(self.dir, "feeds.txt")
+        with open(feeds, "w") as f:
+            f.write("odd|ftp://example.com/feed.xml\n")
+        out = self.fetch("--all", "--sources", "feeds", "--feeds", feeds)
+        self.assertEqual(out["items"], [])
+        self.assertEqual([e["source"] for e in out["errors"]], ["feeds:odd"])
+        self.assertIn("not an http(s) URL", out["errors"][0]["error"])
+
     def test_osv_items(self):
         p = self.run_tool("fetch", "--all", "--sources", "osv", "--osv-file", os.path.join(FIX, "osv.json"))
         out = json.loads(p.stdout)

@@ -18,7 +18,12 @@ If you were asked to set up a vulnerability digest for a user, this file is not 
 - `site/head.html` - description, canonical address, icons and social preview tags for the instructions page. Paths in it start with `../`, because the page lives at `/docs/`
 - `site/assets/` - the icon and the social preview image. Each PNG is rendered from the SVG next to it
 - `site/llms.txt`, `site/robots.txt`, `site/ai.txt`, `site/sitemap.xml` - published as they are
-- `.github/workflows/pages.yml` - runs the build and the check on every pull request, and publishes from `main`
+- `.github/workflows/pages.yml` - runs the tests, the build, the check, the linters and the secret scan on every pull request, and publishes from `main` only when all of them pass
+- `.github/ci-requirements.txt` - versions and hashes of ruff and zizmor for the `lint` job
+- `.github/dependabot.yml` - weekly updates of the actions and of `ci-requirements.txt`, with a 7 day cooldown
+- `.github/CODEOWNERS` - the owner of the pipeline and the build scripts
+- `ruff.toml` - the security rules (S) that ruff checks in `tools/`
+- `SECURITY.md` - how to report a vulnerability
 
 ## Build and check
 
@@ -30,7 +35,12 @@ sh site/build.sh
 sh site/check.sh
 ```
 
-All must exit with code 0. `site/check.sh` prints `all checks passed`. The same commands run in CI
+All must exit with code 0. `site/check.sh` prints `all checks passed`. The same commands run in CI, in the `build` job
+
+CI also runs two more jobs. Both must pass before the site is published:
+
+- `lint` - actionlint and zizmor check `.github/`, ruff checks `tools/` with the rules in `ruff.toml`
+- `secrets` - Betterleaks scans the whole git history for secrets
 
 ## Published files
 
@@ -82,6 +92,9 @@ The crawler policy is: everything is allowed, for search, for fetching on a user
 - use versions that are at least 7 days old. Read SHAs and digests from GitHub and from the registry, not from memory
 - never write a `${{ ... }}` expression that holds data from a pull request inside `run:`
 - the workflow token stays read-only. Only the `deploy` job has write permissions
+- tools that the workflow downloads are pinned by version and checksum. Python tools go to `.github/ci-requirements.txt` with `--hash`
+- do not make a check non-blocking, and do not add `noqa`, a zizmor ignore or a Betterleaks allowlist entry without a comment that explains why
+- Dependabot does not update image digests in `site/build.sh` and in the workflow, or the actionlint checksum. Update them by hand
 
 ## How to change this repository
 
