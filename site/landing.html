@@ -10,8 +10,7 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="theme-color" content="#f3eee2" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#14120e" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#2c3a35">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="vuln-digest">
 <meta property="og:title" content="vuln-digest - vulnerability news for your stack, from your AI assistant">
@@ -51,24 +50,15 @@
 
 <main>
 
-<div class="wrap">
-  <div class="masthead" aria-hidden="true">
-    <p class="mast-title">The Vuln Digest</p>
-    <p class="mast-motto">All the vulnerabilities fit to patch - and only the ones you run</p>
-  </div>
-  <div class="dateline">
-    <span id="today">Every morning</span>
-    <span>Edition: your stack</span>
-    <span>Free · MIT · any AI assistant</span>
-  </div>
-</div>
-
 <section class="front">
-  <div class="wrap front-grid">
+  <div class="wrap">
+  <div class="folder">
+  <p class="tab">Case file · your stack</p>
+  <p class="dateline"><span>Subject: vulnerabilities you actually run</span><span>Opened: <span id="today">every morning</span></span><span>Free · MIT · any AI assistant</span></p>
+  <div class="front-grid">
     <div class="lead">
-      <p class="kicker">Lead story</p>
-      <h1>Watch vulnerabilities <em>yourself</em>. No vendor needed</h1>
-      <p class="deck">Your AI assistant reads your repositories and docs, learns what you run, and every morning hands you a one-page edition: exploited first, with what to do.</p>
+            <h1>Watch vulnerabilities <em>yourself</em>. No vendor needed</h1>
+      <p class="deck">Your AI assistant reads your repositories and docs, opens a file on your stack, and briefs you every morning: exploited first, with what to do.</p>
       <div class="ads">
         <div class="ad">
           <p class="ad-head">Any AI assistant</p>
@@ -87,14 +77,17 @@
       </div>
       <p class="small-links"><a href="README.md">Instructions for AI (Markdown)</a> · <a href="docs/">Read them as a page</a></p>
     </div>
-    <aside class="side" aria-label="From a sample edition">
-      <p class="side-head">In a morning edition</p>
-      <div class="story"><span class="stamp">Exploited</span><b>php2shell hits PHP sites</b><span>In CISA KEV. Update to 8.4.28 today</span></div>
+    <aside class="side sheet" aria-label="From a sample brief">
+      <span class="clip" aria-hidden="true"></span>
+      <p class="side-head">Morning brief · 21 Nov 2026</p>
+      <div class="story"><span class="stamp">Exploited</span><b><mark>php2shell</mark> hits PHP sites</b><span>In CISA KEV. Update to 8.4.28 today</span></div>
       <div class="story"><b>nginx2root: RCE in HTTP/2</b><span>Your ingress controllers. Update to 1.30.7</span></div>
       <div class="story"><b>Java4Shell: WAF rules added</b><span>Update · the fix stays the same</span></div>
       <div class="story"><span>Also: ruby2shell, WordPress 7.1.5 · Nothing new for .NET</span></div>
-      <p class="side-foot"><a href="#example">Read the full sample edition</a></p>
+      <p class="side-foot"><a href="#example">Read the full sample brief</a></p>
     </aside>
+  </div>
+  </div>
   </div>
 </section>
 
@@ -105,8 +98,8 @@
     <ol class="flow">
       <li><span class="num">I</span><div><h3>It looks before it asks</h3><p>If your assistant is connected to GitHub, GitLab, Confluence or Notion, it reads your lock files, Dockerfiles, Helm charts, Terraform and infrastructure pages. Read only: it does not clone, run or change anything, and keeps no code or secrets. No connector? Give it a repository, an SBOM, or just a list.</p></div></li>
       <li><span class="num">II</span><div><h3>It asks only what it could not find</h3><p>"nginx and PHP 8.3 are in three repositories - is that production?" "Ruby is only in a two-year-old service - ignore it?" Then when to send, where, and in which language. Every question has a default.</p></div></li>
-      <li><span class="num">III</span><div><h3>It schedules itself</h3><p>A scheduled task in your assistant, or GitHub Actions or cron where there is none. A small state file makes sure nothing is sent twice. You get a test edition right away.</p></div></li>
-      <li><span class="num">IV</span><div><h3>You read, act and steer</h3><p>Exploited issues in your stack come first, with fixed versions and a command to check. Reply "hide WordPress" or "I patched nginx" and the next editions follow. Once a month it can look at your repositories again and ask about anything new.</p></div></li>
+      <li><span class="num">III</span><div><h3>It schedules itself</h3><p>A scheduled task in your assistant, or GitHub Actions or cron where there is none. A small state file makes sure nothing is sent twice. You get a test brief right away.</p></div></li>
+      <li><span class="num">IV</span><div><h3>You read, act and steer</h3><p>Exploited issues in your stack come first, with fixed versions and a command to check. Reply "hide WordPress" or "I patched nginx" and the next briefs follow. Once a month it can look at your repositories again and ask about anything new.</p></div></li>
     </ol>
   </div>
 </section>
@@ -116,7 +109,7 @@
     <p class="section-head">Why read it</p>
     <h2>What you get</h2>
     <div class="columns">
-      <div class="col-item"><h3>Five minutes instead of a morning of feeds</h3><p>One short edition instead of advisories, mailing lists and vendor blogs. On days with nothing new, one line.</p></div>
+      <div class="col-item"><h3>Five minutes instead of a morning of feeds</h3><p>One short brief instead of advisories, mailing lists and vendor blogs. On days with nothing new, one line.</p></div>
       <div class="col-item"><h3>Only what you run</h3><p>Matched by meaning: ingress-nginx is nginx, GKE is Google Cloud. What you never want to see stays out.</p></div>
       <div class="col-item"><h3>Exploited first</h3><p>CISA KEV, public exploits and EPSS decide the order. An exploited issue in your stack can come as an urgent alert, not tomorrow.</p></div>
       <div class="col-item"><h3>A next step, not just a CVE</h3><p>The fixed version, whether yours is affected and a command to check it, taken from the source and linked.</p></div>
@@ -128,10 +121,12 @@
 
 <section id="example" class="block">
   <div class="wrap">
-    <p class="section-head">Sample edition</p>
+    <p class="section-head">Exhibit A</p>
     <h2>What a digest looks like</h2>
     <p class="sub">For someone who runs Kubernetes with ingress-nginx, a PHP site, Java services, .NET and Google Cloud. Yours comes in your language and in the channel you choose.</p>
     <article class="digest" aria-label="Example digest">
+      <span class="clip" aria-hidden="true"></span>
+      <span class="stamp big" aria-hidden="true">Patch today</span>
       <header>
         <h3>Vulnerability digest - 21 November 2026</h3>
         <p class="meta">Sources: Zero Wire, CISA KEV · 4 new, 1 update · 3 in your focus</p>
@@ -179,8 +174,8 @@
       </ul>
     </div>
     <div>
-      <p class="section-head">Wire services</p>
-      <h2>Where the news comes from</h2>
+      <p class="section-head">Sources</p>
+      <h2>Where the data comes from</h2>
       <ul class="sources">
         <li><a href="https://radar.cloudflare.com/zero-wire">Cloudflare Radar Zero Wire</a><span>briefings on the vulnerabilities that matter most, with updates</span></li>
         <li><a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog">CISA KEV</a><span>what is exploited in the wild</span></li>
@@ -194,7 +189,7 @@
 
 <section class="block">
   <div class="wrap">
-    <p class="section-head">Editorial standards</p>
+    <p class="section-head">Ground rules</p>
     <h2>Built to be trusted</h2>
     <div class="columns">
         <div class="col-item"><h3>Runs in your assistant</h3><p>There is no service and no account. This site is static. Your stack, your schedule and your state stay where your assistant keeps them.</p></div>
@@ -209,7 +204,7 @@
 
 <section id="faq" class="block">
   <div class="wrap faq">
-    <p class="section-head">Readers ask</p>
+    <p class="section-head">On file</p>
     <h2>Questions</h2>
     <details>
       <summary>Which assistants does it work with?</summary>
@@ -252,8 +247,8 @@
 
 <section class="block final">
   <div class="wrap">
-    <p class="section-head">Subscribe</p>
-    <h2>Start your edition</h2>
+    <p class="section-head">New case</p>
+    <h2>Open your file</h2>
       <div class="ads">
         <div class="ad">
           <p class="ad-head">Any AI assistant</p>

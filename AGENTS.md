@@ -14,8 +14,8 @@ If you were asked to set up a vulnerability digest for a user, this file is not 
 - `site/version.json` - the current version and the list of releases. Running jobs read it once a week
 - `site/build.sh` - builds the site into `_site/`
 - `site/check.sh` - checks the built site
-- `site/landing.html`, `site/landing.css` - the landing page for people at `/`, set as a morning newspaper. Hand-written, no external scripts or fonts
-- `site/fonts/` - Fraunces, Source Serif 4 and IBM Plex Mono (latin subset, woff2), served from the site so that no page loads anything from a third party. Licensed under the SIL Open Font License, the license files sit next to the fonts and are published with them
+- `site/landing.html`, `site/landing.css` - the landing page for people at `/`, set as a case file on a desk. Hand-written, no external scripts or fonts
+- `site/fonts/` - Archivo, Special Elite and IBM Plex Mono (latin subset, woff2), served from the site so that no page loads anything from a third party. Archivo and IBM Plex Mono are under the SIL Open Font License, Special Elite under the Apache License 2.0; the license files sit next to the fonts and are published with them
 - `site/404.html` - the page for unknown addresses
 - `site/style.css`, `site/footer.html`, `site/toc.lua` - the look of the instructions page at `/docs/`, its footer, and a filter that puts the title above the table of contents
 - Links between pages are relative, so the site works on its own domain and under a path such as `/vuln-digest/` on github.io. Only `site/404.html` uses absolute paths: the build prefixes them with `BASE_PATH`, set in the workflow
