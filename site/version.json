@@ -1,6 +1,11 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "releases": [
+    {
+      "version": "1.1.0",
+      "date": "2026-11-22",
+      "summary": "New step 0: before the questions, the agent reads the stack from the user's own connectors (GitHub, GitLab, wiki), asks only about what it could not find, and can rescan it once a month"
+    },
     {
       "version": "1.0.0",
       "date": "2026-11-22",

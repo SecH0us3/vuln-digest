@@ -2,7 +2,7 @@
 
 This file is a task for an AI assistant: Claude, ChatGPT, Gemini, Codex, Cursor or any other. The user gives the assistant this file and asks it to set up a vulnerability digest. The address of this file is https://vuln-digest.secmy.app/README.md
 
-Version: 1.0.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
+Version: 1.1.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
 
 If you are a person, the overview is at https://vuln-digest.secmy.app/ - give the address of this file to your AI assistant and it does the rest
 
@@ -12,7 +12,7 @@ Your task is to learn what the user runs, set up a job that sends the user a sho
 
 The work has three stages:
 
-- **Stage 1 - interview.** Do steps 1 and 2: ask the user the questions, then write the profile
+- **Stage 1 - interview.** Do steps 0, 1 and 2: look at what the user's tools already show you, ask the user the questions, then write the profile
 - **Stage 2 - setup.** Do steps 3-6: choose where the state lives, create the schedule, set up the delivery, make a test run and show it to the user
 - **Stage 3 - every run.** The scheduled job follows the "Run" section. You write the prompt for that job in step 6, and that prompt tells the job to read this file
 
@@ -23,7 +23,7 @@ Terms:
 - **Source** - a place that publishes vulnerabilities: a feed, a catalog or an API. The list is in the "Sources" section
 - **Item** - one entry from a source: a briefing, an advisory, a catalog entry. An item has a key, a date and a list of updates
 - **Update** - a dated change to an item: it was published, a patch came out, a PoC appeared, it was added to a catalog of exploited vulnerabilities
-- **Profile** - the user's answers from step 1, saved as a file or as text in the job prompt (step 2)
+- **Profile** - what step 0 found and the user's answers from step 1, saved as a file or as text in the job prompt (step 2)
 - **State** - the record of which items and updates were already delivered (step 3)
 - **Run** - one execution of the scheduled job: fetch, filter, write, deliver, mark as delivered
 - **In focus** - an item that touches a product, package or platform from the user's profile
@@ -43,7 +43,38 @@ Rules:
 
 ---
 
+## Step 0. Look before you ask
+
+The user should not have to list their stack by hand if you can read it. Before the questions, find out what you can already see, read it, and come to step 1 with a draft
+
+**1. Find your read access.** List the connectors, MCP servers and other tools you have in this conversation that can read the user's code, infrastructure or documentation: GitHub, GitLab, Bitbucket or Azure DevOps, a wiki (Confluence, Notion), a cloud console, a ticket tracker, a local folder. If you see none, ask the user once:
+
+> Before the questions: do you have a connector or MCP server for the place where your products and infrastructure are described, such as GitHub, GitLab, Confluence or Notion? If so, connect it, or give me a repository or a folder, and I will read your stack from there instead of asking you to list it. You can also skip this
+
+If the user skips, go to step 1
+
+**2. Read, only read.** With the user's consent for each tool, look at:
+
+- the repositories of products the user names, or, for an organization, the repositories with recent commits. If there are more than about 20, ask which ones matter;
+- the files in "Find the stack yourself" below: lock files, Dockerfiles, Helm charts, Terraform, Kubernetes manifests, CI;
+- infrastructure and architecture pages in the wiki: what runs where, what is exposed to the internet, network and VPN equipment, SaaS;
+- the issue tracker only if the user points you to it
+
+Do not clone, install or run anything, and do not change anything. Do not copy source code, secrets, internal hostnames or personal data into the profile: keep product and package names, versions, and where you found them
+
+**3. Show what you found and ask about it.** Show a short table: product, version, where you found it, and your guess whether it is in production and exposed. Then ask specific questions about what you are not sure of, for example:
+
+- "nginx and PHP 8.3 are in three repositories. Is that production?"
+- "Ruby is only in `legacy-billing`, last commit two years ago. Show Ruby issues, or ignore them?"
+- "The wiki says the VPN is FortiGate. Add it?"
+
+Keep what the user confirms. Write where each entry came from into `stack_sources` in the profile (step 2), so that it can be read again later
+
+**4. Read it again later.** If the user agrees, the profile gets `rescan: monthly`. Once a month, on the weekly summary day, the job reads the same places again, if it has the same read access, and adds one line to the digest: what is new or gone, for example "Next.js 16 appeared in `web-shop`, reply 'add Next.js' to watch it". The job never changes the stack by itself. A job without that access skips the rescan and says so once
+
 ## Step 1. Ask the user
+
+If step 0 found the stack, do not ask again what it already answers: show its result as the answer to questions 1, 2 and 13, and ask only the rest
 
 Ask all the questions in one message. Give a default for each one, so the user can answer only the ones they care about, or answer "defaults". Number the questions so the user can answer by number
 
@@ -67,7 +98,7 @@ Ask one more question only if the answers leave a real gap. Do not ask about thi
 
 ### Find the stack yourself
 
-If the user gave a repository, a folder or an SBOM, read it and build the list of products and packages. Read only. Do not install or run anything from the repository
+If the user gave a repository, a folder or an SBOM, or step 0 found one, read it and build the list of products and packages. Read only. Do not install or run anything from the repository
 
 | What | Where to look |
 |---|---|
@@ -106,6 +137,10 @@ stack:                       # what the user runs. Names as the user says them, 
   - { name: Chrome, aliases: [Chromium, V8] }
   - { name: Java, aliases: [OpenJDK, JVM, Spring Boot] }
 packages_file: packages.txt  # for OSV, optional
+stack_sources:               # where step 0 read the stack, for the rescan. Names, not secrets
+  - { kind: github, repos: [acme/web-shop, acme/infra] }
+  - { kind: confluence, pages: ["Infrastructure overview"] }
+rescan: monthly              # monthly | off - see step 0
 
 ignore:                      # never show
   - WordPress plugins
@@ -366,7 +401,8 @@ On the chosen day, add a section (or send a separate message if the profile says
 - **Still open** - items in focus from the last 4 weeks that were not marked as patched, with their current status. `python3 -I vuln_feed.py history --days 28` lists the delivered items with their titles, links and last updates;
 - **Status changes this week** - added to KEV, a public exploit appeared, a fix came out, a fix was found to be incomplete;
 - **The week in numbers** - items seen, items in focus, urgent items;
-- **One thing to do this week** - the most useful action for this user
+- **One thing to do this week** - the most useful action for this user;
+- **Stack changes** - once a month, if the profile says `rescan: monthly`: what the rescan from step 0 found, one line per product
 
 ### Urgent alert
 
