@@ -1,0 +1,17 @@
+{
+  "name": "vuln-digest",
+  "owner": {
+    "name": "SecH0us3",
+    "url": "https://github.com/SecH0us3"
+  },
+  "metadata": {
+    "description": "Scheduled vulnerability digests for your stack, set up by your AI assistant"
+  },
+  "plugins": [
+    {
+      "name": "vuln-digest",
+      "source": "./",
+      "description": "Sets up a scheduled digest of new vulnerabilities that matter to your stack: interview, profile, schedule, delivery, test run"
+    }
+  ]
+}

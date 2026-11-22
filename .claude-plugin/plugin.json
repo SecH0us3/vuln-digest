@@ -1,0 +1,13 @@
+{
+  "name": "vuln-digest",
+  "version": "1.0.0",
+  "description": "Sets up a scheduled digest of new vulnerabilities that matter to your stack: interview, profile, schedule, delivery, test run",
+  "author": {
+    "name": "SecH0us3",
+    "url": "https://github.com/SecH0us3"
+  },
+  "homepage": "https://vuln-digest.secmy.app/",
+  "repository": "https://github.com/SecH0us3/vuln-digest",
+  "license": "MIT",
+  "keywords": ["security", "vulnerabilities", "cve", "digest", "kev", "osv"]
+}

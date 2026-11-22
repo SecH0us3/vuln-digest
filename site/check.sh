@@ -77,6 +77,13 @@ cmp -s README.md _site/index.md || fail 'index.md differs from README.md'
 cmp -s README.md _site/llms-full.txt || fail 'llms-full.txt differs from README.md'
 cmp -s AGENTS.md _site/AGENTS.md || fail 'AGENTS.md copy differs'
 cmp -s tools/vuln_feed.py _site/vuln_feed.py || fail 'vuln_feed.py copy differs'
+cmp -s site/version.json _site/version.json || fail 'version.json copy differs'
+
+# Running jobs compare the Version line of their copy of README.md with version.json
+grep -qF "${SITE}version.json" README.md || fail 'README.md does not link version.json'
+readme_version="$(sed -n 's/^Version: \([0-9][0-9.]*[0-9]\)\. .*/\1/p' README.md | head -n 1)"
+[ -n "$readme_version" ] || fail 'README.md has no Version line'
+grep -qF "\"version\": \"$readme_version\"" _site/version.json || fail "version.json does not list version $readme_version as current"
 
 # The README tells agents where the script and the instructions live
 grep -qF "${SITE}vuln_feed.py" README.md || fail 'README.md does not link the helper script'
