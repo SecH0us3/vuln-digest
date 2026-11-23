@@ -429,6 +429,20 @@ class VulnFeedTest(unittest.TestCase):
         self.assertEqual([e["source"] for e in out["errors"]], ["feeds:notfeed"])
         self.assertIn("not an RSS or Atom feed", out["errors"][0]["error"])
 
+    def test_failed_feed_keeps_the_group_cut_off(self):
+        feeds = os.path.join(self.dir, "missing.txt")  # the feeds file itself is missing on the first run
+        self.fetch("--since", "2026-11-01", "--sources", "feeds", "--feeds", feeds)
+        self.run_tool("mark")
+        feeds = self.feeds_file(node=NODE_RSS, debian=DEBIAN_RDF)
+        del self.server.pages["/debian.xml"]
+        self.fetch("--sources", "feeds", "--feeds", feeds, today="2026-11-25")
+        src = load(self.state)["sources"]
+        self.assertEqual((src["feeds:node"], src["feeds:debian"]), ("2026-11-01", {"pending": "2026-11-01"}))
+        self.assertNotIn("feeds", src)
+        self.server.pages["/debian.xml"] = DEBIAN_RDF
+        out = self.fetch("--sources", "feeds", "--feeds", feeds, today="2026-11-26")
+        self.assertEqual(len(out["items"]), 3)  # node, and both Debian entries: they are after 2026-11-01
+
     def test_truncated_prefixed_atom_entries(self):
         feeds = self.feeds_file(a='<atom:feed xmlns:atom="http://www.w3.org/2005/Atom"><atom:entry><atom:title>One</atom:title>'
                                   '<atom:id>1</atom:id></atom:entry><atom:entry><atom:title>cut')

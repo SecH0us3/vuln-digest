@@ -143,8 +143,9 @@ def ctext(el, *names):
     elements, such as the XHTML inside Atom <content type="xhtml">"""
     for n in names:
         for c in el:
-            if lname(c) == n and "".join(c.itertext()).strip():
-                return "".join(c.itertext())
+            text = " ".join(c.itertext())  # a space between tags: <p>CVE-2026-1</p><p>2 steps</p>
+            if lname(c) == n and text.strip():
+                return text
     return ""
 
 
@@ -195,7 +196,7 @@ def parse_zerowire(raw, warnings=None):
             "link": ctext(it, "link"),
             "date": date,
             "summary": strip_html(desc),
-            "cves": sorted(set(CVE_RE.findall(content + desc))),
+            "cves": sorted(set(CVE_RE.findall(content + " " + desc))),
             "updates": updates,
             "text": strip_html(content)[:8000],
         })
@@ -518,13 +519,17 @@ def prev_day(d):
     return (datetime.date.fromisoformat(d) - datetime.timedelta(days=1)).isoformat()
 
 
-def baseline(st, items, done, today, since):
+def baseline(st, items, done, today, since, failed=()):
     """Count old updates of a source as seen when it is read for the first time, so that a new feed,
     or a source that failed on the first run, does not flood the digest with its archive.
     The cut-off: --since if given; the first run's --since for a source that failed on that run;
     otherwise the day before the last digest. A source read only in part stays {"pending": cut-off}
     and keeps that cut-off until it is read in full. Returns True if the state changed"""
     src, changed = st["sources"], False
+    for sid in failed:  # a feed that fails while its group is pending keeps the group's cut-off
+        group = sid.split(":")[0]
+        if group != sid and sid not in src and group in src and not isinstance(src[group], str):
+            src[sid], changed = src[group] or {"pending": st.get("since") or today}, True
     for sid in sorted(done | {i["source"] for i in items}):
         if isinstance(src.get(sid), str):
             continue
@@ -719,7 +724,7 @@ def main():
         if first:  # a source that failed now is pending: it gets the same cut-off when it answers
             st = {"version": STATE_VERSION, "items": {}, "last_digest": None, "since": a.since,
                   "sources": {e["source"]: {"pending": a.since} for e in errors}}
-        if baseline(st, items, done, today, a.since) or first:
+        if baseline(st, items, done, today, a.since, {e["source"] for e in errors}) or first:
             save_json(a.state, st)
 
     result, meta = [], {}
