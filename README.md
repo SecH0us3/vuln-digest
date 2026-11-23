@@ -2,7 +2,7 @@
 
 This file is a task for an AI assistant: Claude, ChatGPT, Gemini, Codex, Cursor or any other. The user gives the assistant this file and asks it to set up a vulnerability digest. The address of this file is https://vuln-digest.secmy.app/README.md
 
-Version: 1.1.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
+Version: 1.2.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
 
 If you are a person, the overview is at https://vuln-digest.secmy.app/ - give the address of this file to your AI assistant and it does the rest
 
@@ -47,11 +47,11 @@ Rules:
 
 The user should not have to list their stack by hand if you can read it. Before the questions, find out what you can already see, read it, and come to step 1 with a draft
 
-**1. Find your read access.** List the connectors, MCP servers and other tools you have in this conversation that can read the user's code, infrastructure or documentation: GitHub, GitLab, Bitbucket or Azure DevOps, a wiki (Confluence, Notion), a cloud console, a ticket tracker, a local folder. If you see none, ask the user once:
+**1. Find your read access.** List the connectors, MCP servers and other tools you have in this conversation that can read the user's code, infrastructure or documentation: GitHub, GitLab, Bitbucket or Azure DevOps, a wiki (Confluence, Notion), a cloud console, a ticket tracker, a local folder. Then ask the user this one question on its own, before any other question. If you have a tool for questions with choices (see "How to ask" in step 1), use it: up to three options for the tools you found or the most likely ones, and "skip" as the last one. The user can type another. Otherwise ask in plain text:
 
-> Before the questions: do you have a connector or MCP server for the place where your products and infrastructure are described, such as GitHub, GitLab, Confluence or Notion? If so, connect it, or give me a repository or a folder, and I will read your stack from there instead of asking you to list it. You can also skip this
+> Before the questions: where are your products and infrastructure described? I can read your stack from there instead of asking you to list it. Pick one: GitHub, GitLab, Notion, Confluence, Google Drive, a local folder or repository, or skip
 
-If the user skips, go to step 1
+Name only the tools you have or the user can connect. If the user picks a tool that is not connected, tell them how to connect it and wait. If the user skips, go to step 1
 
 **2. Read, only read.** With the user's consent for each tool, look at:
 
@@ -76,7 +76,26 @@ Keep what the user confirms. Write where each entry came from into `stack_source
 
 If step 0 found the stack, do not ask again what it already answers: show its result as the answer to questions 1, 2 and 13, and ask only the rest
 
-Ask all the questions in one message. Give a default for each one, so the user can answer only the ones they care about, or answer "defaults". Number the questions so the user can answer by number
+### How to ask
+
+Ask step by step, not all at once. A wall of thirteen questions gets answered "defaults" without being read
+
+- **Use a question tool if you have one.** Many assistants have a tool that shows the user a question with choices to click, for example `AskUserQuestion` in Claude Code. Use it for every question in this step. Put the default first and mark it "(default)". Keep each option short, and let the user type their own answer: most of these tools add an "Other" field. Ask at most four questions per call
+- **Without such a tool, ask in plain text,** a round at a time: three or four numbered questions with the default for each, and "reply 'defaults' to keep them". Wait for the answer before the next round
+- **A scheduled job never asks.** This step runs only in the setup conversation
+
+Ask in this order. Skip a question that step 0 or an earlier answer already settled
+
+1. **The stack** - questions 1, 2 and 13. If step 0 found the stack, this round is only its confirmation (step 0, point 3). These answers are free text: ask them as text, or as choices only where you have a guess to offer, such as "nginx and PHP 8.3 are in production: yes / no / partly"
+2. **Shortcut** - one question: "Keep the defaults for everything else, or go through it?" with the two choices and a one-line summary of the defaults: when it runs, where it goes, what it shows. If the user keeps the defaults, skip to the last round
+3. **When** - questions 5, 6, 7 and 8. For question 5, offer "weekdays at 08:00", "daily at 08:00", "weekly on Monday" and let the user type another time. Ask for the time zone only if you do not know it
+4. **What** - questions 3, 4, 10 and 12
+5. **Where and from what** - questions 9 and 11. Offer as choices only the delivery channels this platform can reach (step 5). For question 11 offer "the defaults" and the optional sources that fit the stack, as a multiple choice
+6. **Check** - show the answers in one short list and ask "Is this right?" with "yes, write the profile" and "change something". Then go to step 2
+
+The table lists every question, why it matters and its default. Ask in the user's words, not as table rows
+
+### The questions
 
 | # | Question | Why | Default |
 |---|---|---|---|

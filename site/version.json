@@ -1,6 +1,11 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "releases": [
+    {
+      "version": "1.2.0",
+      "date": "2026-11-23",
+      "summary": "The setup interview is step by step: one question about where the stack is described, then short rounds with clickable choices where the assistant has a question tool, and a shortcut to keep the defaults"
+    },
     {
       "version": "1.1.0",
       "date": "2026-11-22",
