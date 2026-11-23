@@ -235,6 +235,10 @@
       <p>Yes, with the same instructions inside. Run <code>/plugin marketplace add SecH0us3/vuln-digest</code>, then <code>/plugin install vuln-digest@vuln-digest</code>, and ask Claude for a vulnerability digest. The plugin holds one skill and the helper script. It has no hooks and no MCP servers, so nothing runs until you ask.</p>
     </details>
     <details>
+      <summary>I installed the plugin, why is it missing in the Claude desktop app?</summary>
+      <p>The commands above install it for Claude Code on your computer. In the desktop app it shows up in the Code tab, in a local session: click <b>+</b> next to the prompt box, then <b>Plugins</b>. If a session was already open, type <code>/reload-plugins</code> in it. Chat and Cowork do not read plugins installed from the terminal: they take plugins and skills from your claude.ai account. There, paste the prompt above instead. The setup asks the same questions.</p>
+    </details>
+    <details>
       <summary>How do I get new sources and fixes?</summary>
       <p>If your assistant can keep files, your digest runs from a copy saved at setup, so a change on this site never changes it behind your back. Once a week it checks for a new version and adds one line to the digest if there is one. Say "update vuln-digest", and the assistant shows what changed (new sources, new commands, what leaves your machine) and replaces the copy only if you agree.</p>
     </details>
