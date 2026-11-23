@@ -108,9 +108,13 @@ h1 em { font-style: normal; background: var(--ink); color: var(--folder); paddin
   background-image: repeating-linear-gradient(transparent 0 25px, var(--ruled) 25px 26px);
   background-position: 0 2.6rem;
   padding: 0.75rem 1rem 0.8rem;
-  box-shadow: 0 2px 0 var(--shadow);
+  box-shadow: 0 8px 18px var(--shadow);
   border-top: 3px solid var(--red);
+  transform: rotate(-1.4deg);
 }
+/* two separate cards stuck on the folder, each at its own angle */
+.ad + .ad { transform: rotate(1.1deg); margin-top: 0.4rem; }
+@media (max-width: 640px) { .ads { gap: 1.4rem; } .ad { transform: rotate(-0.5deg); } .ad + .ad { transform: rotate(0.5deg); margin-top: 0; } }
 .ad-head { font: 800 0.85rem var(--display); text-transform: uppercase; letter-spacing: 0.06em; color: var(--red); margin: 0; }
 .ad-sub { margin: 0; font-size: 0.85rem; color: var(--muted); }
 .ad pre, .cmd code { margin: 0; font: 0.84rem/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: break-word; color: var(--ink); }
