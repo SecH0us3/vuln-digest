@@ -8,6 +8,8 @@
   --desk: #2c3a35;
   --desk-fg: #d9e2dc;
   --desk-muted: #9fb0a7;
+  --desk-stripe: rgba(255, 255, 255, 0.045);
+  --desk-glow: rgba(255, 255, 255, 0.06);
   --folder: #e8d9b5;
   --folder-edge: #d6c49b;
   --paper: #fbf7ec;
@@ -29,6 +31,8 @@
     --desk: #121815;
     --desk-fg: #d9e2dc;
     --desk-muted: #8c9c93;
+    --desk-stripe: rgba(255, 255, 255, 0.03);
+    --desk-glow: rgba(255, 255, 255, 0.035);
     --folder: #3b3326;
     --folder-edge: #4a4030;
     --paper: #26221b;
@@ -46,6 +50,12 @@
 * { box-sizing: border-box; }
 html { background: var(--desk); color: var(--ink); scroll-behavior: smooth; }
 body { margin: 0; font: 15.5px/1.65 var(--mono); background: var(--desk); overflow-wrap: break-word; }
+/* The desk: fine diagonal pinstripes under a desk lamp, so the green is not one flat colour */
+body {
+  background-image:
+    radial-gradient(ellipse 90% 60% at 50% 0, var(--desk-glow), transparent 70%),
+    repeating-linear-gradient(135deg, transparent 0 9px, var(--desk-stripe) 9px 10px);
+}
 a { color: var(--link); text-underline-offset: 0.15em; }
 img { max-width: 100%; }
 .wrap { max-width: 75rem; margin: 0 auto; padding: 0 16px; }
