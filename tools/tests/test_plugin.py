@@ -105,6 +105,8 @@ class VersionTest(unittest.TestCase):
         site = load("site/version.json")
         self.assertEqual(readme_version(), plugin, "README.md Version line and plugin.json differ")
         self.assertEqual(site["version"], plugin, "site/version.json and plugin.json differ")
+        script = re.search(r'^VERSION = "([^"]+)"', (ROOT / "tools/vuln_feed.py").read_text(encoding="utf-8"), re.M)
+        self.assertEqual(script.group(1), plugin, "VERSION in tools/vuln_feed.py and plugin.json differ")
 
     def test_releases(self):
         site = load("site/version.json")

@@ -59,7 +59,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
-VERSION = "1.3.0"
+VERSION = "1.4.1"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 ZEROWIRE_FEED = "https://radar.cloudflare.com/zero-wire/feed"
 KEV_JSON = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -139,11 +139,12 @@ def lname(el):
 
 
 def ctext(el, *names):
-    """Text of the first child whose local name is in names, tried in that order"""
+    """Text of the first child whose local name is in names, tried in that order. Includes nested
+    elements, such as the XHTML inside Atom <content type="xhtml">"""
     for n in names:
         for c in el:
-            if lname(c) == n and (c.text or "").strip():
-                return c.text
+            if lname(c) == n and "".join(c.itertext()).strip():
+                return "".join(c.itertext())
     return ""
 
 
@@ -153,12 +154,16 @@ def feed_entries(raw):
     """<item> (RSS 2.0, RSS 1.0) and <entry> (Atom) elements in any namespace.
     A feed cut off in transfer still gives its complete entries"""
     try:
-        return [e for e in ET.fromstring(raw).iter() if lname(e) in ("item", "entry")], None  # noqa: S314
+        root = ET.fromstring(raw)  # noqa: S314
+        entries = [e for e in root.iter() if lname(e) in ("item", "entry")]
+        if not entries and lname(root) not in ("rss", "RDF", "feed"):
+            raise ValueError(f"not an RSS or Atom feed: the root element is <{lname(root)}>")
+        return entries, None
     except ET.ParseError as e:
         text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
         ns = " ".join(f'{k}="{v}"' for k, v in dict(re.findall(r'(xmlns(?::\w+)?)="([^"]*)"', text[:4000])).items())
         items = []
-        for m in re.finditer(r"<(item|entry)\b.*?</\1>", text, re.S):
+        for m in re.finditer(r"<((?:\w+:)?(?:item|entry))\b.*?</\1>", text, re.S):
             try:
                 items.append(ET.fromstring(f"<x {ns}>{m.group(0)}</x>")[0])  # noqa: S314
             except ET.ParseError:
@@ -244,9 +249,9 @@ def parse_vendor_feed(name, raw, warnings=None):
         link = entry_link(e)
         ident = ctext(e, "guid", "id") or e.get("{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about") or link or title
         date = feed_date(ctext(e, "pubDate", "updated", "published", "date"))
-        body = ctext(e, "description", "encoded", "summary", "content")
+        body = ctext(e, "encoded", "content", "description", "summary")  # the full text first
         text = strip_html(body)
-        cves = sorted(set(CVE_RE.findall(title + body)))
+        cves = sorted(set(CVE_RE.findall(" ".join([title, body, ctext(e, "description", "summary")]))))
         items.append({
             "key": f"feed:{name}:{ident}",
             "source": f"feeds:{name}",
@@ -282,8 +287,9 @@ def check_feed(name, url):
     warnings = []
     try:
         items = parse_vendor_feed(name, raw, warnings)
-    except ET.ParseError:
+    except (ET.ParseError, ValueError) as e:
         items = []
+        row["problems"].append(str(e))
     dates = sorted(i["date"] for i in items if i["date"])
     row.update(entries=len(items), newest=dates[-1] if dates else "",
                with_cve=sum(1 for i in items if i["cves"]), undated=len(items) - len(dates))
@@ -294,7 +300,8 @@ def check_feed(name, url):
         row["problems"].append("no entry names a CVE: is this a security feed, or a blog?")
     if row["undated"]:
         row["problems"].append(f"{row['undated']} entries without a readable date")
-    row["ok"] = bool(items) and not warnings
+    row["latest"] = [i["title"] for i in sorted(items, key=lambda i: i["date"], reverse=True)[:3]]
+    row["ok"] = not row["problems"]
     return row
 
 
@@ -515,21 +522,26 @@ def baseline(st, items, done, today, since):
     """Count old updates of a source as seen when it is read for the first time, so that a new feed,
     or a source that failed on the first run, does not flood the digest with its archive.
     The cut-off: --since if given; the first run's --since for a source that failed on that run;
-    otherwise the day before the last digest. Returns True if the state changed"""
-    pending = {k for k, v in st["sources"].items() if v is None}
-    changed = False
+    otherwise the day before the last digest. A source read only in part stays {"pending": cut-off}
+    and keeps that cut-off until it is read in full. Returns True if the state changed"""
+    src, changed = st["sources"], False
     for sid in sorted(done | {i["source"] for i in items}):
-        if st["sources"].get(sid):
+        if isinstance(src.get(sid), str):
             continue
+        group = sid.split(":")[0]  # a pending "feeds" covers each feed of the list
+        p = src.get(sid, src.get(group, "") if group != sid else "")
         if since:
             cutoff = since
-        elif sid in pending or sid.split(":")[0] in pending or not st.get("last_digest"):
+        elif isinstance(p, dict):
+            cutoff = p["pending"]
+        elif p is None or not st.get("last_digest"):  # None: pending, from state v4 before 1.4.1
             cutoff = st.get("since") or today
         else:
             cutoff = prev_day(st["last_digest"])
         mark(st, [i for i in items if i["source"] == sid], today, only_before=cutoff)
-        if sid in done:  # a source read only in part stays pending: the rest is counted next time
-            st["sources"][sid] = cutoff
+        src[sid] = cutoff if sid in done else {"pending": cutoff}
+        if sid in done and group != sid and not isinstance(src.get(group, ""), str):
+            del src[group]
         changed = True
     return changed
 
@@ -598,7 +610,8 @@ def collect(a, known):
                 errors += errs
             else:
                 raise ValueError(f"unknown source {src!r}")
-            if not any(e["source"] == src for e in errors):
+            # osv counts as read once its queries answered: an advisory that failed comes later as new
+            if src == "osv" or src != "feeds" and not any(e["source"] == src for e in errors):
                 done.add(src)
         except Exception as e:  # one source down must not hide the others
             errors.append({"source": src, "error": f"{type(e).__name__}: {e}"})
@@ -705,7 +718,7 @@ def main():
         first = st is None
         if first:  # a source that failed now is pending: it gets the same cut-off when it answers
             st = {"version": STATE_VERSION, "items": {}, "last_digest": None, "since": a.since,
-                  "sources": {e["source"]: None for e in errors}}
+                  "sources": {e["source"]: {"pending": a.since} for e in errors}}
         if baseline(st, items, done, today, a.since) or first:
             save_json(a.state, st)
 

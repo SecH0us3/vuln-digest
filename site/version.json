@@ -1,10 +1,15 @@
 {
-  "version": "1.4.0",
+  "version": "1.4.1",
   "sha256": {
-    "README.md": "6057be3376e7f3d2ecaf967ae25b1ee3b20049de5596ce2d9c810d1afd3ed569",
-    "vuln_feed.py": "62d04f42d1c0c541cf9bb91200b79d38c4be8cf068a06bc50e550da8eecb7cff"
+    "README.md": "8eba623026825df4509a8fc110935ef669cb0dadafaefd648a92b0163de4775f",
+    "vuln_feed.py": "57fbe7fe274b0f9d0a39014c283efd933183b93ebe1e1c4db7c8ca9a047909fd"
   },
   "releases": [
+    {
+      "version": "1.4.1",
+      "date": "2026-11-23",
+      "summary": "Fixes: snoozed items come back once, a pause also stops the quiet-day CI shortcut, CVE ids are found in the full text of feed entries, check-feeds flags feeds without CVE ids, a partly read source keeps its first cut-off"
+    },
     {
       "version": "1.4.0",
       "date": "2026-11-23",
