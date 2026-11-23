@@ -29,15 +29,6 @@
       ]
     },
     {
-      "id": "alpine",
-      "name": "Alpine Linux",
-      "aliases": ["alpine"],
-      "kind": "os",
-      "sources": [
-        {"type": "feed", "name": "alpine", "url": "https://gitlab.alpinelinux.org/alpine/aports/-/issues.atom?state=closed&label_name[]=tag%3Asecurity"}
-      ]
-    },
-    {
       "id": "nodejs",
       "name": "Node.js",
       "aliases": ["node", "nodejs"],
@@ -89,7 +80,7 @@
       "aliases": [],
       "kind": "framework",
       "sources": [
-        {"type": "feed", "name": "django", "url": "https://www.djangoproject.com/rss/weblog/"}
+        {"type": "nvd", "name": "django", "cpe": "cpe:2.3:a:djangoproject:django"}
       ]
     },
     {
@@ -261,7 +252,7 @@
       "aliases": ["gitlab ce", "gitlab ee"],
       "kind": "devops",
       "sources": [
-        {"type": "feed", "name": "gitlab", "url": "https://docs.gitlab.com/releases/patch-releases.xml"}
+        {"type": "nvd", "name": "gitlab", "cpe": "cpe:2.3:a:gitlab:gitlab"}
       ]
     },
     {

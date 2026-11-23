@@ -46,7 +46,12 @@ PUBLIC_GO_HOSTS = {
 PURL_ECOSYSTEMS = {
     "npm": "npm", "pypi": "PyPI", "golang": "Go", "maven": "Maven", "nuget": "NuGet",
     "cargo": "crates.io", "gem": "RubyGems", "composer": "Packagist", "deb": "Debian",
-    "apk": "Alpine", "rpm": "Red Hat", "pub": "Pub", "swift": "SwiftURL", "github": "GitHub Actions",
+    "apk": "Alpine", "rpm": "rpm", "pub": "Pub", "swift": "SwiftURL", "githubactions": "GitHub Actions",
+}
+# pkg:rpm/<vendor>/...: the vendor picks the OSV ecosystem; an unknown vendor is dropped, not guessed
+RPM_VENDORS = {
+    "redhat": "Red Hat", "rhel": "Red Hat", "rocky": "Rocky Linux", "rockylinux": "Rocky Linux",
+    "almalinux": "AlmaLinux", "suse": "SUSE", "sles": "SUSE", "opensuse": "openSUSE", "mageia": "Mageia",
 }
 
 
@@ -63,13 +68,23 @@ def token_ok(url):
     return u.scheme == "https" or u.hostname in ("127.0.0.1", "localhost")
 
 
+class SafeRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is followed only to http or https (urllib would also follow ftp:)"""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        web_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+OPENER = urllib.request.build_opener(SafeRedirect)
+
+
 # S310: urlopen gets only URLs that web_url() checked
 def http_get(url, timeout=30, extra_headers=None):
     headers = {"User-Agent": UA}
     if extra_headers:
         headers.update(extra_headers)
     req = urllib.request.Request(web_url(url), headers=headers)  # noqa: S310
-    with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
+    with OPENER.open(req, timeout=timeout) as r:
         body = r.read(MAX_BYTES + 1)
     if len(body) > MAX_BYTES:
         raise ValueError(f"response larger than {MAX_BYTES} bytes: {url}")
@@ -96,6 +111,11 @@ def parse_purl(purl):
     parts = [urllib.parse.unquote(p) for p in path_part.split("/") if p]
     if not parts:
         return None
+    if eco == "rpm":
+        eco = RPM_VENDORS.get(parts[0].lower()) if len(parts) >= 2 else None
+        if not eco:
+            return None
+        return eco, parts[-1], ver
     if eco == "Maven" and len(parts) >= 2:
         name = f"{parts[0]}:{parts[1]}"
     elif eco in ("Debian", "Alpine", "Red Hat") and len(parts) >= 2:
@@ -217,8 +237,8 @@ def toml_blocks(text):
     blocks = []
     cur, section = None, ""
     for raw in text.splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if not line:
+        line = raw.strip()
+        if not line or line.startswith("#"):
             continue
         if line == "[[package]]":
             if cur:
@@ -233,7 +253,10 @@ def toml_blocks(text):
         if "=" in line:
             k, _, v = line.partition("=")
             key = f"{section}.{k.strip()}" if section else k.strip()
-            cur[key] = v.strip()
+            v = v.strip()
+            q = re.match(r"^(\"[^\"]*\"|'[^']*')", v)
+            # a '#' inside quotes is data (Cargo git sources end in #<commit>); after them it is a comment
+            cur[key] = q.group(1) if q else v.split("#", 1)[0].strip()
     if cur:
         blocks.append(cur)
     return blocks
@@ -297,11 +320,28 @@ def parse_uv_lock(text):
 
 
 def parse_go_mod(text):
-    """Returns (own_modules, runtimes, local_replaces)"""
-    own, runtimes, replaces = set(), [], set()
+    """Returns (packages, own_modules, runtimes, local_replaces).
+    Since Go 1.17 the require lines list every module of the build, direct and // indirect,
+    at the version the build selects, so they are the package list; go.sum is not"""
+    pkgs, own, runtimes, replaces = [], set(), [], set()
+    in_require = False
     for raw in text.splitlines():
         line = raw.split("//", 1)[0].strip()
         if not line:
+            continue
+        if in_require:
+            if line == ")":
+                in_require = False
+            elif len(line.split()) >= 2:
+                mod, ver = line.split()[:2]
+                pkgs.append(("Go", mod.strip('"'), strip_v(ver), "prod"))
+            continue
+        if re.match(r"^require\s*\($", line):
+            in_require = True
+            continue
+        q = re.match(r"^require\s+(\S+)\s+(\S+)", line)
+        if q:
+            pkgs.append(("Go", q.group(1).strip('"'), strip_v(q.group(2)), "prod"))
             continue
         m = re.match(r"^module\s+(\S+)", line)
         if m:
@@ -314,21 +354,38 @@ def parse_go_mod(text):
         r = re.match(r"^(?:replace\s+)?(\S+)\s+(?:\S+\s+)?=>\s+(\S+)", line)
         if r and (r.group(2).startswith((".", "/")) or "." not in r.group(2).split("/")[0]):
             replaces.add(r.group(1))
-    return own, runtimes, replaces
+    return pkgs, own, runtimes, replaces
+
+
+def go_mod_lists_all(path):
+    """True when go.mod says go 1.17 or later: then its require lines hold the whole build list"""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            m = re.search(r"(?m)^go\s+(\d+)\.(\d+)", f.read(MAX_BYTES))
+    except OSError:
+        return False
+    return bool(m) and (int(m.group(1)), int(m.group(2))) >= (1, 17)
+
+
+def go_ver_key(ver):
+    """Sort key for Go module versions: release > its pre-release, numbers compared as numbers"""
+    core, _, pre = strip_v(ver).split("+", 1)[0].partition("-")
+    nums = tuple(int(x) if x.isdigit() else 0 for x in core.split("."))
+    return nums, pre == "", pre
 
 
 def parse_go_sum(text):
-    out, seen = [], set()
+    """Fallback when there is no go.mod next to it. go.sum keeps every version that was
+    ever in the module graph, so only the highest one per module is taken"""
+    best = {}
     for raw in text.splitlines():
         parts = raw.split()
         if len(parts) < 2:
             continue
-        mod, ver = parts[0], parts[1].removesuffix("/go.mod")
-        ver = strip_v(ver)
-        if (mod, ver) not in seen:
-            seen.add((mod, ver))
-            out.append(("Go", mod, ver, "prod"))
-    return out
+        mod, ver = parts[0], strip_v(parts[1].split("/go.mod", 1)[0])
+        if mod not in best or go_ver_key(ver) > go_ver_key(best[mod]):
+            best[mod] = ver
+    return [("Go", mod, ver, "prod") for mod, ver in best.items()]
 
 
 def parse_requirements(filename, text):
@@ -467,8 +524,8 @@ def parse_one(relpath, text):
     if base in UNSUPPORTED_LOCKFILES:
         return [], [], set(), "convert to CycloneDX/SPDX SBOM or inspect directly"
     if base == "go.mod":
-        own, rts, replaces = parse_go_mod(text)
-        return [], rts, own | replaces, None
+        pkgs, own, rts, replaces = parse_go_mod(text)
+        return pkgs, rts, own | replaces, None
     if base == "go.sum":
         return parse_go_sum(text), [], set(), None
     if base == "Cargo.lock":
@@ -606,9 +663,15 @@ def run_scan(a):
     else:
         if not a.target:
             raise SystemExit("scan needs a path or --stdin --format FILENAME")
-        for rel, full in iter_target_files(a.target):
+        files = list(iter_target_files(a.target))
+        go_mod_dirs = {os.path.dirname(rel) for rel, full in files
+                       if os.path.basename(rel) == "go.mod" and go_mod_lists_all(full)}
+        for rel, full in files:
+            if os.path.basename(rel) == "go.sum" and os.path.dirname(rel) in go_mod_dirs:
+                continue  # go.mod require lines already give the selected versions
             try:
                 if os.path.getsize(full) > MAX_BYTES:
+                    errors.append({"file": rel, "error": f"larger than {MAX_BYTES} bytes, skipped"})
                     continue
                 with open(full, encoding="utf-8", errors="replace") as f:
                     text = f.read()

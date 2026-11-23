@@ -173,12 +173,15 @@ class VulnStackTest(unittest.TestCase):
         write(os.path.join(self.dir, "app.spdx.json"), json.dumps(spdx))
         # Go
         write(os.path.join(self.dir, "go.mod"),
-              "module github.com/acme/web\n\ngo 1.23.2\n\nreplace github.com/acme/shared => ./shared\n")
+              "module github.com/acme/web\n\ngo 1.23.2\n\n"
+              "require github.com/gin-gonic/gin v1.10.0\n\n"
+              "require (\n\tgit.corp.internal/team/auth v1.2.3 // indirect\n\tgithub.com/acme/shared v0.0.0\n)\n\n"
+              "replace github.com/acme/shared => ./shared\n")
+        # go.sum next to a go 1.17+ go.mod is not read: it keeps old versions of the graph
         write(os.path.join(self.dir, "go.sum"),
               "github.com/gin-gonic/gin v1.10.0 h1:aaa\n"
-              "github.com/gin-gonic/gin v1.10.0/go.mod h1:bbb\n"
-              "github.com/acme/web/pkg v0.1.0 h1:ccc\n"
-              "git.corp.internal/team/auth v1.2.3 h1:ddd\n")
+              "github.com/gin-gonic/gin v1.6.0/go.mod h1:bbb\n"
+              "golang.org/x/net v0.1.0/go.mod h1:ccc\n")
         # Composer
         write(os.path.join(self.dir, "composer.lock"), json.dumps({
             "packages": [
@@ -257,6 +260,42 @@ class VulnStackTest(unittest.TestCase):
         self.assertTrue({("node", "22-alpine"), ("nginx", "1.27.2-alpine"), ("go", "1.23.2"),
                          ("node", "22.11.0"), ("python", "3.12.7"), (".net", "8.0.403"), ("ruby", "3.3.5")} <= rt_names)
         self.assertFalse(any(r["name"] in ("build", "scratch") for r in rep["runtimes"]))
+
+    def test_scan_go_sum_fallback_rpm_toml_and_big_files(self):
+        # go.sum alone: one, highest version per module (release above its pre-release)
+        write(os.path.join(self.dir, "svc", "go.sum"),
+              "golang.org/x/net v0.1.0 h1:a\ngolang.org/x/net v0.1.0/go.mod h1:b\n"
+              "golang.org/x/net v0.20.0/go.mod h1:c\ngolang.org/x/net v0.20.0-rc.1 h1:d\n"
+              "golang.org/x/net v0.9.0 h1:e\n")
+        # old go.mod (before 1.17) lists only direct requires, so go.sum is still read
+        write(os.path.join(self.dir, "old", "go.mod"), "module example.com/old\n\ngo 1.16\n")
+        write(os.path.join(self.dir, "old", "go.sum"), "github.com/pkg/errors v0.9.1 h1:x\n")
+        cdx = {"bomFormat": "CycloneDX", "components": [
+            {"purl": "pkg:rpm/redhat/openssl@3.0.7-27.el9"},
+            {"purl": "pkg:rpm/opensuse/curl@8.6.0-1.1"},
+            {"purl": "pkg:rpm/acmeos/zlib@1.3"},
+            {"purl": "pkg:github/acme/tool@v1.0.0"},
+            {"purl": "pkg:githubactions/actions/checkout@v4.2.2"},
+        ]}
+        write(os.path.join(self.dir, "bom.cdx.json"), json.dumps(cdx))
+        write(os.path.join(self.dir, "Cargo.lock"),
+              '[[package]]\nname = "tokio"  # comment\nversion = "1.40.0" # pinned\n'
+              'source = "registry+https://github.com/rust-lang/crates.io-index"\n\n'
+              '[[package]]\nname = "forked"\nversion = "0.3.0"\n'
+              'source = "git+https://github.com/acme/forked?rev=abc#0123abcd"\n')
+        with open(os.path.join(self.dir, "requirements.txt"), "w") as f:
+            f.truncate(16 * 1024 * 1024 + 1)
+        out_pkg = os.path.join(self.dir, "packages.txt")
+        rep = json.loads(self.run_tool("scan", self.dir, "--out", out_pkg).stdout)
+        self.assertEqual(set(lines(out_pkg)), {
+            "Go|golang.org/x/net|0.20.0",
+            "Go|github.com/pkg/errors|0.9.1",
+            "Red Hat|openssl|3.0.7-27.el9",
+            "openSUSE|curl|8.6.0-1.1",
+            "GitHub Actions|actions/checkout|v4.2.2",
+            "crates.io|tokio|1.40.0",
+        })
+        self.assertEqual([e["file"] for e in rep["errors"]], ["requirements.txt"])
 
     def test_scan_stdin_and_diff(self):
         old_pkg = os.path.join(self.dir, "old.txt")
