@@ -1,6 +1,6 @@
 {
   "name": "vuln-digest",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Sets up a scheduled digest of new vulnerabilities that matter to your stack: interview, profile, schedule, delivery, test run",
   "author": {
     "name": "SecH0us3",

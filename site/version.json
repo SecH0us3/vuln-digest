@@ -1,10 +1,15 @@
 {
-  "version": "1.4.1",
+  "version": "1.5.0",
   "sha256": {
-    "README.md": "8eba623026825df4509a8fc110935ef669cb0dadafaefd648a92b0163de4775f",
-    "vuln_feed.py": "7a3b471251a01cd8f4fd7ff58e892e9d8f0951f760c3f6218e3e92a81aeb4706"
+    "README.md": "a5091e219cb382f315115dd421cd5fe62743b2375bacb1ee7363ee899ccdf6d4",
+    "vuln_feed.py": "8d7b6ad464ed1c8253a7cf5a04af18ac6e9de23f88bccb32ed501062864f52b1"
   },
   "releases": [
+    {
+      "version": "1.5.0",
+      "date": "2026-11-23",
+      "summary": "New sources ghsa (api.github.com) and nvd (services.nvd.nist.gov) via --ghsa and --nvd with optional GITHUB_TOKEN and NVD_API_KEY env vars, plus --cve-details enrichment from CVE.org (cveawg.mitre.org)"
+    },
     {
       "version": "1.4.1",
       "date": "2026-11-23",
