@@ -27,7 +27,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CATALOG = os.path.join(HERE, "catalog.json")
@@ -68,11 +68,20 @@ def token_ok(url):
     return u.scheme == "https" or u.hostname in ("127.0.0.1", "localhost")
 
 
+def same_origin(a, b):
+    u1, u2 = urllib.parse.urlsplit(a), urllib.parse.urlsplit(b)
+    return (u1.scheme, u1.hostname, u1.port) == (u2.scheme, u2.hostname, u2.port)
+
+
 class SafeRedirect(urllib.request.HTTPRedirectHandler):
-    """A redirect is followed only to http or https (urllib would also follow ftp:)"""
+    """A redirect is followed only to http or https, and never carries tokens to another origin"""
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         web_url(newurl)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and (not same_origin(req.full_url, newurl) or not token_ok(newurl)):
+            for h in [k for k in new.headers if k.lower() in ("authorization", "apikey")]:
+                del new.headers[h]
+        return new
 
 
 OPENER = urllib.request.build_opener(SafeRedirect)
@@ -118,7 +127,7 @@ def parse_purl(purl):
         return eco, parts[-1], ver
     if eco == "Maven" and len(parts) >= 2:
         name = f"{parts[0]}:{parts[1]}"
-    elif eco in ("Debian", "Alpine", "Red Hat") and len(parts) >= 2:
+    elif eco in ("Debian", "Alpine") and len(parts) >= 2:
         if eco == "Debian" and parts[0].lower() == "ubuntu":
             eco = "Ubuntu"
         name = parts[-1]
@@ -323,7 +332,7 @@ def parse_go_mod(text):
     """Returns (packages, own_modules, runtimes, local_replaces).
     Since Go 1.17 the require lines list every module of the build, direct and // indirect,
     at the version the build selects, so they are the package list; go.sum is not"""
-    pkgs, own, runtimes, replaces = [], set(), [], set()
+    raw_reqs, own, runtimes, replaces, remote_rep = [], set(), [], set(), {}
     in_require = False
     for raw in text.splitlines():
         line = raw.split("//", 1)[0].strip()
@@ -334,14 +343,14 @@ def parse_go_mod(text):
                 in_require = False
             elif len(line.split()) >= 2:
                 mod, ver = line.split()[:2]
-                pkgs.append(("Go", mod.strip('"'), strip_v(ver), "prod"))
+                raw_reqs.append((mod.strip('"'), strip_v(ver)))
             continue
         if re.match(r"^require\s*\($", line):
             in_require = True
             continue
         q = re.match(r"^require\s+(\S+)\s+(\S+)", line)
         if q:
-            pkgs.append(("Go", q.group(1).strip('"'), strip_v(q.group(2)), "prod"))
+            raw_reqs.append((q.group(1).strip('"'), strip_v(q.group(2))))
             continue
         m = re.match(r"^module\s+(\S+)", line)
         if m:
@@ -351,9 +360,27 @@ def parse_go_mod(text):
         if g:
             runtimes.append({"name": "go", "version": g.group(1)})
             continue
-        r = re.match(r"^(?:replace\s+)?(\S+)\s+(?:\S+\s+)?=>\s+(\S+)", line)
-        if r and (r.group(2).startswith((".", "/")) or "." not in r.group(2).split("/")[0]):
-            replaces.add(r.group(1))
+        if "=>" in line:
+            left, _, right = re.sub(r"^replace\s+", "", line).partition("=>")
+            lp, rp = left.split(), right.split()
+            if not (lp and rp):
+                continue
+            old_m = lp[0].strip('"')
+            old_v = strip_v(lp[1]) if len(lp) >= 2 else None
+            target = rp[0].strip('"')
+            if len(rp) >= 2 and not target.startswith((".", "/")) and "." in target.split("/")[0]:
+                remote_rep[(old_m, old_v)] = (target, strip_v(rp[1]))
+                if old_m != target:
+                    replaces.add(old_m)
+            else:
+                replaces.add(old_m)
+    pkgs = []
+    for mod, ver in raw_reqs:
+        if (mod, ver) in remote_rep:
+            mod, ver = remote_rep[(mod, ver)]
+        elif (mod, None) in remote_rep:
+            mod, ver = remote_rep[(mod, None)]
+        pkgs.append(("Go", mod, ver, "prod"))
     return pkgs, own, runtimes, replaces
 
 
@@ -595,11 +622,18 @@ def iter_target_files(root):
             if not is_scan_target(fn):
                 continue
             full = os.path.join(dirpath, fn)
+            if os.path.islink(full):
+                continue
             yield os.path.relpath(full, root), full
 
 
-def classify_pkg(eco, name, role, own_go, allow_scopes, exclude_prefixes):
+BAD_TOKEN_RE = re.compile(r"[\s|#\x00-\x1f\x7f]")
+
+
+def classify_pkg(eco, name, ver, role, own_go, allow_scopes, exclude_prefixes):
     if role == "private":
+        return "private", None
+    if not (name and ver) or BAD_TOKEN_RE.search(name) or BAD_TOKEN_RE.search(ver):
         return "private", None
     if any(name.startswith(p) for p in exclude_prefixes):
         return "private", None
@@ -666,8 +700,12 @@ def run_scan(a):
         files = list(iter_target_files(a.target))
         go_mod_dirs = {os.path.dirname(rel) for rel, full in files
                        if os.path.basename(rel) == "go.mod" and go_mod_lists_all(full)}
+        # Ensure go.mod in a directory is parsed before go.sum in the same directory
+        files.sort(key=lambda pair: (os.path.dirname(pair[0]), 0 if os.path.basename(pair[0]) == "go.mod" else 1, pair[0]))
+        go_direct_by_dir = {}
         for rel, full in files:
-            if os.path.basename(rel) == "go.sum" and os.path.dirname(rel) in go_mod_dirs:
+            bname, dname = os.path.basename(rel), os.path.dirname(rel)
+            if bname == "go.sum" and dname in go_mod_dirs:
                 continue  # go.mod require lines already give the selected versions
             try:
                 if os.path.getsize(full) > MAX_BYTES:
@@ -679,6 +717,10 @@ def run_scan(a):
                 errors.append({"file": rel, "error": str(e)})
                 continue
             pkgs, rts, own, unsup = parse_one(rel, text)
+            if bname == "go.mod":
+                go_direct_by_dir[dname] = {m for _, m, _, _ in pkgs}
+            elif bname == "go.sum" and dname in go_direct_by_dir:
+                pkgs = [p for p in pkgs if p[1] not in go_direct_by_dir[dname]]
             raw_pkgs += pkgs
             runtimes += [{**r, "source": rel} for r in rts]
             own_go |= own
@@ -692,7 +734,7 @@ def run_scan(a):
     prod, dev, suspects = set(), set(), {}
     skipped_private, skipped_dev = 0, 0
     for eco, name, ver, role in raw_pkgs:
-        kind, scope = classify_pkg(eco, name, role, own_go, allow, excl)
+        kind, scope = classify_pkg(eco, name, ver, role, own_go, allow, excl)
         if kind == "private":
             skipped_private += 1
         elif kind == "dev":

@@ -59,6 +59,11 @@ class Server:
                 if page is None:
                     self.send_error(404)
                     return
+                if isinstance(page, tuple):
+                    self.send_response(page[0])
+                    self.send_header("Location", page[1])
+                    self.end_headers()
+                    return
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(page if isinstance(page, bytes) else page.encode())
@@ -310,6 +315,11 @@ class VulnFeedTest(unittest.TestCase):
         self.assertEqual(out["items"], [])
         self.assertEqual([e["source"] for e in out["errors"]], ["feeds:odd"])
         self.assertIn("not an http(s) URL", out["errors"][0]["error"])
+        # non-http(s) <link> inside a feed entry is stripped
+        self.server.pages["/js.xml"] = "<rss><channel><item><title>JS</title><link>javascript:alert(1)</link><guid>g1</guid></item></channel></rss>"
+        write(feeds, f"js|{self.server.url}/js.xml\n")
+        out_js = self.fetch("--all", "--sources", "feeds", "--feeds", feeds)
+        self.assertEqual(out_js["items"][0]["link"], "")
 
     def test_osv_items(self):
         p = self.run_tool("fetch", "--all", "--sources", "osv", "--osv-file", os.path.join(FIX, "osv.json"))
@@ -602,18 +612,27 @@ class VulnFeedTest(unittest.TestCase):
             return json.dumps(repo_advs)
 
         def serve_eco(query, hdrs):
-            self.assertIn("ecosystem=npm", query)
+            self.assertIn("ecosystem=pip", query)  # OSV "PyPI" mapped to GitHub "pip"
             self.assertIn("affects=widget", query)  # one package, not the whole ecosystem
             return json.dumps(eco_advs)
 
         self.server.pages["/repos/acme/proxy/security-advisories"] = serve_repo
+        # Redirect from 127.0.0.1 to localhost (different origin) must strip Authorization
+        alt_url = self.server.url.replace("127.0.0.1", "localhost")
+        self.server.pages["/repos/acme/redir/security-advisories"] = (302, f"{alt_url}/repos/acme/proxy/security-advisories")
+        self.server.pages["/repos/acme/ftp/security-advisories"] = (302, "ftp://example.com/secret")
         self.server.pages["/advisories"] = serve_eco
         ghsa_file = os.path.join(self.dir, "ghsa.txt")
-        write(ghsa_file, "# repos and packages\nacme/proxy\npackage|npm|widget\nacme/missing\n")
+        write(ghsa_file, "# repos and packages\nacme/proxy\nacme/redir\nacme/ftp\npackage|PyPI|widget\nacme/missing\n")
         out = self.fetch("--all", "--sources", "kev,ghsa", "--ghsa", ghsa_file,
                          "--ghsa-api", self.server.url + "/", env={"GITHUB_TOKEN": "example"})
-        self.assertEqual(seen_auth, ["Bearer example"])
-        self.assertEqual([e["source"] for e in out["errors"]], ["ghsa:acme/missing"])
+        self.assertEqual(seen_auth, ["Bearer example", None])
+        self.assertEqual([e["source"] for e in out["errors"]], ["ghsa:acme/ftp", "ghsa:acme/missing"])
+        # Unknown GHSA ecosystem fails fast
+        bad_ghsa = os.path.join(self.dir, "bad_ghsa.txt")
+        write(bad_ghsa, "package|Debian|openssl\n")
+        p = self.run_tool("fetch", "--all", "--sources", "ghsa", "--ghsa", bad_ghsa, ok=False)
+        self.assertNotEqual(p.returncode, 0)
         items = {i["key"]: i for i in out["items"]}
         r_item = items["ghsa:GHSA-repo-1111-2222"]
         self.assertEqual(r_item["fixed_versions"], ["1.31.2"])
@@ -669,6 +688,11 @@ class VulnFeedTest(unittest.TestCase):
                     "metrics": {"cvssMetricV31": [{"cvssData": {
                         "baseScore": 9.8, "baseSeverity": "CRITICAL",
                         "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]},
+                    "configurations": [{"nodes": [{"cpeMatch": [
+                        {"vulnerable": True, "criteria": "cpe:2.3:o:fortinet:fortios:*:*:*:*:*:*:*:*",
+                         "versionStartIncluding": "7.2.0", "versionEndExcluding": "7.2.10"},
+                        {"vulnerable": False, "criteria": "cpe:2.3:h:fortinet:fortigate-100f:-:*:*:*:*:*:*:*"},
+                    ]}]}],
                 }},
                 {"cve": {
                     "id": "CVE-2026-7002", "published": "2026-10-01T10:00:00.000",
@@ -708,6 +732,8 @@ class VulnFeedTest(unittest.TestCase):
         self.assertEqual(item["cvss_score"], 9.8)
         self.assertEqual(item["severity"], "CRITICAL")
         self.assertEqual(item["summary"], "Auth bypass in FortiOS")
+        self.assertEqual(item["fixed_versions"], ["7.2.10"])
+        self.assertEqual(item["affected"], [">= 7.2.0 < 7.2.10"])
         self.assertNotIn("nvd", load(self.state)["sources"])
         self.assertEqual(load(self.state)["sources"]["nvd:fortios"], "2026-11-15")
         # window > 120 days is clamped to 119 days, and truncated responses flag partial=True

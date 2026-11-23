@@ -1,12 +1,17 @@
 {
-  "version": "1.6.0",
+  "version": "1.6.1",
   "sha256": {
-    "README.md": "1cb52f753174effb02eb6bfe60558d4f360e5c132e766edc37c94ed3d4c14a8f",
-    "vuln_feed.py": "15e4b309c9066f0d6b3249c77479970d0a38003936519b408a2697ca0ea7cc03",
-    "vuln_stack.py": "cb6df5233a2eaaeb79c2418cb2af3d0e294dc944273a67900446f9feea2d1e9c",
-    "catalog.json": "e9c07e4924d0fae50e85eff436110dd340f8026db551d93d7477c1f9bf748941"
+    "README.md": "f0d19d26470580a99dd4e9509ecc852187c9493e94a17ffba4d6d49fdeee2591",
+    "vuln_feed.py": "fe23cfb1b64c14faa59a0e6d3fe40fa8b238b0bb330968ac0ea1ab52fb453167",
+    "vuln_stack.py": "1a5be629694121aa427215895df9b41b26e4ad244ec13d6b7e4ed05427bca1d1",
+    "catalog.json": "725d0d622b9cf92aa8d76a556205627f86802dd013812b5c6464df123f019a58"
   },
   "releases": [
+    {
+      "version": "1.6.1",
+      "date": "2026-11-23",
+      "summary": "Fixes: redirects stay on http(s) and strip API tokens across origins, feed links must be http(s), scan skips symlinks and line-injected package tokens, NVD items include affected and fixed versions, GHSA maps OSV ecosystems, and Go scan applies remote replace"
+    },
     {
       "version": "1.6.0",
       "date": "2026-11-23",

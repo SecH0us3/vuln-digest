@@ -62,7 +62,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 ZEROWIRE_FEED = "https://radar.cloudflare.com/zero-wire/feed"
 KEV_JSON = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -89,7 +89,38 @@ def web_url(url):
     return url
 
 
-# S310: urlopen gets only URLs that web_url() checked
+def safe_link(url):
+    """Keep only http(s) links from untrusted feeds and advisories (never javascript:, data: or file:)"""
+    url = (url or "").strip()
+    return url if urllib.parse.urlsplit(url).scheme in ("http", "https") else ""
+
+
+def token_ok(url):
+    """A token goes only over https, or to this machine (the tests)"""
+    u = urllib.parse.urlsplit(url)
+    return u.scheme == "https" or u.hostname in ("127.0.0.1", "localhost")
+
+
+def same_origin(a, b):
+    u1, u2 = urllib.parse.urlsplit(a), urllib.parse.urlsplit(b)
+    return (u1.scheme, u1.hostname, u1.port) == (u2.scheme, u2.hostname, u2.port)
+
+
+class SafeRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is followed only to http or https, and never carries tokens to another origin"""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        web_url(newurl)
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and (not same_origin(req.full_url, newurl) or not token_ok(newurl)):
+            for h in [k for k in new.headers if k.lower() in ("authorization", "apikey")]:
+                del new.headers[h]
+        return new
+
+
+OPENER = urllib.request.build_opener(SafeRedirect)
+
+
+# S310: Request gets only URLs that web_url() checked
 def http_get(url, timeout=60, data=None, extra_headers=None):
     headers = {"User-Agent": UA}
     if extra_headers:
@@ -97,7 +128,7 @@ def http_get(url, timeout=60, data=None, extra_headers=None):
     if data is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(web_url(url), data=data, headers=headers)  # noqa: S310
-    with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
+    with OPENER.open(req, timeout=timeout) as r:
         body = r.read(MAX_BYTES + 1)
     if len(body) > MAX_BYTES:
         raise ValueError(f"response larger than {MAX_BYTES} bytes: {url}")
@@ -201,7 +232,7 @@ def parse_zerowire(raw, warnings=None):
             "key": f"zerowire:{slug}",
             "source": "zerowire",
             "title": ctext(it, "title"),
-            "link": ctext(it, "link"),
+            "link": safe_link(ctext(it, "link")),
             "date": date,
             "summary": strip_html(desc),
             "cves": sorted(set(CVE_RE.findall(content + " " + desc))),
@@ -240,9 +271,9 @@ def entry_link(e):
     for c in e:
         if lname(c) == "link":
             if (c.text or "").strip():
-                return c.text.strip()
+                return safe_link(c.text)
             if c.get("rel", "alternate") == "alternate" and c.get("href"):
-                return c.get("href")
+                return safe_link(c.get("href"))
     return ""
 
 
@@ -465,6 +496,23 @@ def fetch_osv(packages, known, api=OSV_API, osv_file=None):
 
 # ---------- GHSA (GitHub Security Advisories) ----------
 
+GHSA_ECOSYSTEMS = {
+    "actions": "actions", "github actions": "actions", "githubactions": "actions",
+    "composer": "composer", "packagist": "composer",
+    "erlang": "erlang", "hex": "erlang",
+    "go": "go", "golang": "go",
+    "maven": "maven",
+    "npm": "npm",
+    "nuget": "nuget",
+    "other": "other",
+    "pip": "pip", "pypi": "pip",
+    "pub": "pub",
+    "rubygems": "rubygems", "gem": "rubygems",
+    "rust": "rust", "crates.io": "rust", "cargo": "rust",
+    "swift": "swift", "swifturl": "swift",
+}
+
+
 def read_ghsa(path):
     """One entry per line: owner/repo (repository advisories) or package|ecosystem|name
     (reviewed advisories that affect that package, such as package|npm|next)"""
@@ -472,18 +520,15 @@ def read_ghsa(path):
     for line in data_lines(path):
         parts = [p.strip() for p in line.split("|")]
         if parts[0] == "package" and len(parts) == 3 and all(parts):
-            out.append(("package", parts[1], parts[2]))
+            eco = GHSA_ECOSYSTEMS.get(parts[1].lower())
+            if not eco:
+                raise SystemExit(f"bad ghsa ecosystem {parts[1]!r} in {line!r}")
+            out.append(("package", eco, parts[2]))
         elif len(parts) == 1 and re.fullmatch(r"[\w.-]+/[\w.-]+", line) and ".." not in line:
             out.append(("repo", line, ""))
         else:
             raise SystemExit(f"bad ghsa line: {line!r} (expected owner/repo or package|ecosystem|name)")
     return out
-
-
-def token_ok(url):
-    """A token goes only over https, or to this machine (the tests)"""
-    u = urllib.parse.urlsplit(url)
-    return u.scheme == "https" or u.hostname in ("127.0.0.1", "localhost")
 
 
 def ghsa_headers(api):
@@ -543,7 +588,7 @@ def ghsa_item(adv, sid):
         "key": f"ghsa:{gid}",
         "source": sid,
         "title": title,
-        "link": adv.get("html_url") or f"https://github.com/advisories/{gid}",
+        "link": safe_link(adv.get("html_url")) or f"https://github.com/advisories/{gid}",
         "date": published,
         "summary": (adv.get("description") or "")[:1500],
         "cves": sorted(cves),
@@ -602,7 +647,47 @@ def nvd_cvss(metrics):
     return vectors, score, severity
 
 
-def nvd_item(cve_obj, name):
+def nvd_versions(configs, cpe=""):
+    """Extract fixed versions (versionEndExcluding) and affected version ranges for a watched CPE"""
+    prefix = ":".join(cpe.split(":")[:5]).lower()
+    fixed, affected = set(), []
+
+    def walk(nodes):
+        for n in nodes or []:
+            for m in n.get("cpeMatch") or []:
+                if not m.get("vulnerable", True):
+                    continue
+                crit = m.get("criteria") or ""
+                if prefix and not crit.lower().startswith(prefix + ":"):
+                    continue
+                end_ex = (m.get("versionEndExcluding") or "").strip()
+                if end_ex:
+                    fixed.add(end_ex)
+                bounds = []
+                if m.get("versionStartIncluding"):
+                    bounds.append(f">= {m['versionStartIncluding']}")
+                elif m.get("versionStartExcluding"):
+                    bounds.append(f"> {m['versionStartExcluding']}")
+                if end_ex:
+                    bounds.append(f"< {end_ex}")
+                elif m.get("versionEndIncluding"):
+                    bounds.append(f"<= {m['versionEndIncluding']}")
+                if not bounds:
+                    parts = crit.split(":")
+                    if len(parts) > 5 and parts[5] not in ("", "*", "-"):
+                        bounds.append(parts[5])
+                if bounds:
+                    r = " ".join(bounds)
+                    if r not in affected:
+                        affected.append(r)
+            walk(n.get("nodes"))
+
+    for c in configs or []:
+        walk(c.get("nodes"))
+    return sorted(fixed), affected[:12]
+
+
+def nvd_item(cve_obj, name, cpe=""):
     if cve_obj.get("vulnStatus") == "Rejected":
         return None
     cid = cve_obj.get("id") or ""
@@ -613,6 +698,7 @@ def nvd_item(cve_obj, name):
     desc = next((d.get("value", "") for d in descs if d.get("lang") == "en"),
                 descs[0].get("value", "") if descs else "")
     vectors, score, severity = nvd_cvss(cve_obj.get("metrics") or {})
+    fixed, affected = nvd_versions(cve_obj.get("configurations") or [], cpe)
     item = {
         "key": f"nvd:{cid}",
         "source": f"nvd:{name}",
@@ -624,12 +710,16 @@ def nvd_item(cve_obj, name):
         "product": name,
         "severity": severity,
         "cvss": vectors,
-        "sig": fp(severity, str(score or "")),
+        "sig": fp(severity, str(score or ""), *fixed),
         "updates": [{"date": published, "text": "published", "id": fp("nvd", cid)}],
         "text": "",
     }
     if score is not None:
         item["cvss_score"] = score
+    if fixed:
+        item["fixed_versions"] = fixed
+    if affected:
+        item["affected"] = affected
     return item
 
 
@@ -912,7 +1002,7 @@ def collect(a, known):
                             errors.append({"source": sid, "error": f"{data['totalResults']} results, first {len(vulns)} read",
                                            "partial": True})
                         for v in vulns:
-                            it = nvd_item(v.get("cve") or {}, name)
+                            it = nvd_item(v.get("cve") or {}, name, cpe)
                             if not it or it["date"] < start_ts[:10]:  # also when an API ignores pubStartDate
                                 continue
                             if it["key"] in seen_nvd:
