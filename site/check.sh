@@ -46,9 +46,11 @@ for id in $(grep -oE 'href="#[^"]+"' "$LANDING" | sed -E 's/href="#//; s/"$//' |
   grep -qE "id=\"$id\"" "$LANDING" || fail "anchor without target: #$id"
 done
 
-# The helper script size claim on the landing page stays true (about 1,100 lines)
+# The helper scripts size claims on the landing page stay true
 lines="$(wc -l < tools/vuln_feed.py)"
 [ "$lines" -ge 950 ] && [ "$lines" -le 1250 ] || fail "vuln_feed.py has $lines lines: update the landing page text"
+stack_lines="$(wc -l < tools/vuln_stack.py)"
+[ "$stack_lines" -ge 650 ] && [ "$stack_lines" -le 950 ] || fail "vuln_stack.py has $stack_lines lines: update the landing page text"
 
 # --- The instructions page ---
 grep -qF '<nav class="site-header"' "$DOCS" || fail 'the instructions page has no header with a link to the landing page'
@@ -78,8 +80,10 @@ cmp -s README.md _site/index.md || fail 'index.md differs from README.md'
 cmp -s README.md _site/llms-full.txt || fail 'llms-full.txt differs from README.md'
 cmp -s AGENTS.md _site/AGENTS.md || fail 'AGENTS.md copy differs'
 cmp -s tools/vuln_feed.py _site/vuln_feed.py || fail 'vuln_feed.py copy differs'
-# version.json holds the checksums of the published README.md and vuln_feed.py
-for f in README.md vuln_feed.py; do
+cmp -s tools/vuln_stack.py _site/vuln_stack.py || fail 'vuln_stack.py copy differs'
+cmp -s tools/catalog.json _site/catalog.json || fail 'catalog.json copy differs'
+# version.json holds the checksums of the published README.md, helper scripts and catalog
+for f in README.md vuln_feed.py vuln_stack.py catalog.json; do
   sum="$(sha256sum "_site/$f" | cut -d' ' -f1)"
   grep -qF "\"$f\": \"$sum\"" _site/version.json || fail "the sha256 of $f in version.json is out of date"
 done
@@ -91,8 +95,10 @@ readme_version="$(sed -n 's/^Version: \([0-9][0-9.]*[0-9]\)\. .*/\1/p' README.md
 [ -n "$readme_version" ] || fail 'README.md has no Version line'
 grep -qF "\"version\": \"$readme_version\"" _site/version.json || fail "version.json does not list version $readme_version as current"
 
-# The README tells agents where the script and the instructions live
-grep -qF "${SITE}vuln_feed.py" README.md || fail 'README.md does not link the helper script'
+# The README tells agents where the scripts and the instructions live
+grep -qF "${SITE}vuln_feed.py" README.md || fail 'README.md does not link vuln_feed.py'
+grep -qF "${SITE}vuln_stack.py" README.md || fail 'README.md does not link vuln_stack.py'
+grep -qF "${SITE}catalog.json" README.md || fail 'README.md does not link catalog.json'
 grep -qF "${SITE}README.md" README.md || fail 'README.md does not give its own address for the job prompt'
 
 # llms-full.txt starts with an H1 and has H2 sections

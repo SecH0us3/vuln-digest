@@ -5,9 +5,9 @@ description: Set up, change or update a scheduled digest of new vulnerabilities 
 
 # vuln-digest
 
-The instructions are one document: `README.md` at the root of this plugin, two levels up from this skill's directory (`../../README.md`). The helper script is `../../tools/vuln_feed.py`. Read the whole `README.md` and follow it. These files are the version the user installed, so use them instead of downloading the same files from https://vuln-digest.secmy.app/
+The instructions are one document: `README.md` at the root of this plugin, two levels up from this skill's directory (`../../README.md`). The helper scripts are `../../tools/vuln_feed.py` (for every run) and `../../tools/vuln_stack.py` with `../../tools/catalog.json` (for setup and rescan). Read the whole `README.md` and follow it. These files are the version the user installed, so use them instead of downloading the same files from https://vuln-digest.secmy.app/
 
-If `../../README.md` is not there (for example, the skill was uploaded on its own to the Claude app), read https://vuln-digest.secmy.app/README.md and download https://vuln-digest.secmy.app/vuln_feed.py instead
+If `../../README.md` is not there (for example, the skill was uploaded on its own to the Claude app), read https://vuln-digest.secmy.app/README.md and download `vuln_feed.py` (and `vuln_stack.py` and `catalog.json` if needed) from https://vuln-digest.secmy.app/ instead
 
 Three rules come on top of the document:
 

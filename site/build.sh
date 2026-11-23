@@ -53,5 +53,7 @@ cp site/sitemap.xml _site/sitemap.xml
 # The current version of the instructions, read by running jobs once a week
 cp site/version.json _site/version.json
 
-# The helper script, so agents can download it next to the instructions
+# The helper scripts and source catalog, so agents can download them next to the instructions
 cp tools/vuln_feed.py _site/vuln_feed.py
+cp tools/vuln_stack.py _site/vuln_stack.py
+cp tools/catalog.json _site/catalog.json

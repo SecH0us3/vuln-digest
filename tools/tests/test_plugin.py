@@ -79,7 +79,7 @@ class PluginTest(unittest.TestCase):
         self.assertRegex(front.group(1), r"(?m)^description: .{40,}")
         # The skill reads the document, it does not hold a copy of it
         self.assertLess(len(text), 3000)
-        for path in ("../../README.md", "../../tools/vuln_feed.py"):
+        for path in ("../../README.md", "../../tools/vuln_feed.py", "../../tools/vuln_stack.py", "../../tools/catalog.json"):
             self.assertIn(path, text)
             self.assertTrue((skill_dir / path).resolve().is_file(), path)
 
@@ -96,17 +96,25 @@ class PluginTest(unittest.TestCase):
 class VersionTest(unittest.TestCase):
     def test_checksums_in_version_json(self):
         sums = load("site/version.json")["sha256"]
-        for name, path in (("README.md", "README.md"), ("vuln_feed.py", "tools/vuln_feed.py")):
+        for name, path in (
+            ("README.md", "README.md"),
+            ("vuln_feed.py", "tools/vuln_feed.py"),
+            ("vuln_stack.py", "tools/vuln_stack.py"),
+            ("catalog.json", "tools/catalog.json"),
+        ):
             digest = hashlib.sha256((ROOT / path).read_bytes()).hexdigest()
             self.assertEqual(sums[name], digest, f"update sha256 of {name} in site/version.json: sha256sum {path}")
 
     def test_same_version_everywhere(self):
         plugin = load(".claude-plugin/plugin.json")["version"]
         site = load("site/version.json")
+        catalog = load("tools/catalog.json")
         self.assertEqual(readme_version(), plugin, "README.md Version line and plugin.json differ")
         self.assertEqual(site["version"], plugin, "site/version.json and plugin.json differ")
-        script = re.search(r'^VERSION = "([^"]+)"', (ROOT / "tools/vuln_feed.py").read_text(encoding="utf-8"), re.M)
-        self.assertEqual(script.group(1), plugin, "VERSION in tools/vuln_feed.py and plugin.json differ")
+        self.assertEqual(catalog["version"], plugin, "tools/catalog.json and plugin.json differ")
+        for script_path in ("tools/vuln_feed.py", "tools/vuln_stack.py"):
+            script = re.search(r'^VERSION = "([^"]+)"', (ROOT / script_path).read_text(encoding="utf-8"), re.M)
+            self.assertEqual(script.group(1), plugin, f"VERSION in {script_path} and plugin.json differ")
 
     def test_releases(self):
         site = load("site/version.json")
