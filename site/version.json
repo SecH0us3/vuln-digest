@@ -1,6 +1,11 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "releases": [
+    {
+      "version": "1.3.0",
+      "date": "2026-11-23",
+      "summary": "Fixes: a new or failed source no longer floods the digest with its archive, RSS 1.0 feeds are read, OSV shows every affected package and its own fixed versions, items with the same CVE are linked, KEV ransomware use is shown"
+    },
     {
       "version": "1.2.0",
       "date": "2026-11-23",

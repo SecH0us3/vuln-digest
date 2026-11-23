@@ -15,7 +15,13 @@ How repeats are avoided:
   fingerprints of its updates. An item is shown when its key is new, or when it
   has a fingerprint that was not shown before. A guid or a "last reviewed" date
   that changes alone does not make an update. When a CVE of a known item enters
-  the KEV catalog, the item gets a new update "added to CISA KEV"
+  the KEV catalog, the item gets a new update "added to CISA KEV". A vendor feed
+  entry whose title or CVE list changes gets the update "advisory changed"
+
+New sources:
+  the state remembers which sources were read in full. A source read for the first
+  time (a new feed, or one that failed on the first run) does not flood the digest
+  with its archive: its updates dated before the last digest count as seen
 
 Usage:
   python3 -I vuln_feed.py fetch [--sources zerowire,kev] [--packages FILE] [--epss]
@@ -24,7 +30,8 @@ Usage:
       mark exactly the items of the snapshot as delivered. Does not fetch again.
       Run it only after the digest was delivered
   python3 -I vuln_feed.py fetch --since YYYY-MM-DD
-      no state file yet: treat every update dated before this day as already seen
+      no state file yet: treat every update dated before this day as already seen.
+      With a state file, it sets the cut-off for sources that are read for the first time
   python3 -I vuln_feed.py fetch --all
       everything the sources hold now, state is not read or changed (preview)
   python3 -I vuln_feed.py history [--days 28]
@@ -33,6 +40,8 @@ Usage:
 
 Files (next to this script unless set): state.json, last_run.json
 Offline testing: --zerowire-file, --kev-file, --osv-file read local copies
+Items that share a CVE get "same_cve_items" (other keys in this run) and
+"cves_delivered_in" (CVE -> key of an item already delivered): merge them in the digest
 """
 import argparse
 import datetime
@@ -47,17 +56,16 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
-VERSION = "1.0.0"
+VERSION = "1.3.0"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 ZEROWIRE_FEED = "https://radar.cloudflare.com/zero-wire/feed"
 KEV_JSON = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-OSV_BATCH = "https://api.osv.dev/v1/querybatch"
-OSV_VULN = "https://api.osv.dev/v1/vulns/"
+OSV_API = "https://api.osv.dev/v1/"
 EPSS_API = "https://api.first.org/data/v1/epss?cve="
-NS = {"content": "http://purl.org/rss/1.0/modules/content/"}
 HERE = os.path.dirname(os.path.abspath(__file__))
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}")
-STATE_VERSION = 3
+STATE_VERSION = 4
+MAX_BYTES = 32 * 1024 * 1024  # a larger response is refused
 
 
 def fp(*parts):
@@ -73,17 +81,30 @@ def web_url(url):
 
 
 # S310: urlopen gets only URLs that web_url() checked
-def http_get(url, timeout=60):
-    req = urllib.request.Request(web_url(url), headers={"User-Agent": UA})  # noqa: S310
+def http_get(url, timeout=60, data=None):
+    headers = {"User-Agent": UA}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(web_url(url), data=data, headers=headers)  # noqa: S310
     with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
-        return r.read()
+        body = r.read(MAX_BYTES + 1)
+    if len(body) > MAX_BYTES:
+        raise ValueError(f"response larger than {MAX_BYTES} bytes: {url}")
+    return body
 
 
 def http_post_json(url, obj, timeout=60):
-    req = urllib.request.Request(web_url(url), data=json.dumps(obj).encode(), method="POST",  # noqa: S310
-                                 headers={"User-Agent": UA, "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310
-        return json.loads(r.read())
+    return json.loads(http_get(url, timeout, json.dumps(obj).encode()))
+
+
+def data_lines(path):
+    """Lines of a list file. # starts a comment at the start of a line or after a space,
+    so a # inside a URL stays"""
+    with open(path) as f:
+        for line in f:
+            line = re.sub(r"(^|\s)#.*", "", line).strip()
+            if line:
+                yield line
 
 
 def strip_html(s):
@@ -109,19 +130,34 @@ def zerowire_updates(content):
     return out
 
 
+def lname(el):
+    """The tag without its namespace: RSS 2.0, RSS 1.0 (RDF) and Atom name the same things differently"""
+    return el.tag.rsplit("}", 1)[-1] if isinstance(el.tag, str) else ""
+
+
+def ctext(el, *names):
+    """Text of the first child whose local name is in names, tried in that order"""
+    for n in names:
+        for c in el:
+            if lname(c) == n and (c.text or "").strip():
+                return c.text
+    return ""
+
+
 # S314: xml.etree does not load external entities or DTDs, and expat 2.4.1 or later limits
 # entity expansion, so feed XML from the network is safe to parse here
-def rss_items(raw):
-    """<item> elements of an RSS feed. A feed cut off in transfer still gives its complete items"""
+def feed_entries(raw):
+    """<item> (RSS 2.0, RSS 1.0) and <entry> (Atom) elements in any namespace.
+    A feed cut off in transfer still gives its complete entries"""
     try:
-        return list(ET.fromstring(raw).iter("item")), None  # noqa: S314
+        return [e for e in ET.fromstring(raw).iter() if lname(e) in ("item", "entry")], None  # noqa: S314
     except ET.ParseError as e:
         text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
-        ns = " ".join(re.findall(r'xmlns:\w+="[^"]*"', text[:2000]))
+        ns = " ".join(f'{k}="{v}"' for k, v in dict(re.findall(r'(xmlns(?::\w+)?)="([^"]*)"', text[:4000])).items())
         items = []
-        for block in re.findall(r"<item\b.*?</item>", text, re.S):
+        for m in re.finditer(r"<(item|entry)\b.*?</\1>", text, re.S):
             try:
-                items.append(ET.fromstring(f"<rss {ns}>{block}</rss>").find("item"))  # noqa: S314
+                items.append(ET.fromstring(f"<x {ns}>{m.group(0)}</x>")[0])  # noqa: S314
             except ET.ParseError:
                 continue
         if not items:
@@ -130,16 +166,15 @@ def rss_items(raw):
 
 
 def parse_zerowire(raw, warnings=None):
-    elements, warning = rss_items(raw)
+    elements, warning = feed_entries(raw)
     if warning and warnings is not None:
         warnings.append(warning)
     items = []
     for it in elements:
-        guid = it.findtext("guid") or it.findtext("link") or ""
-        desc = it.findtext("description") or ""
-        content = it.findtext("content:encoded", namespaces=NS) or ""
-        pd = it.findtext("pubDate")
-        date = parsedate_to_datetime(pd).date().isoformat() if pd else ""
+        guid = ctext(it, "guid", "link")
+        desc = ctext(it, "description")
+        content = ctext(it, "encoded")
+        date = feed_date(ctext(it, "pubDate"))
         slug = guid.split("@")[0].rstrip("/").split("/")[-1]
         updates = zerowire_updates(content)
         if not updates:  # "legacy": the prototype fingerprinted such items by guid
@@ -148,8 +183,8 @@ def parse_zerowire(raw, warnings=None):
         items.append({
             "key": f"zerowire:{slug}",
             "source": "zerowire",
-            "title": it.findtext("title"),
-            "link": it.findtext("link"),
+            "title": ctext(it, "title"),
+            "link": ctext(it, "link"),
             "date": date,
             "summary": strip_html(desc),
             "cves": sorted(set(CVE_RE.findall(content + desc))),
@@ -159,63 +194,65 @@ def parse_zerowire(raw, warnings=None):
     return items
 
 
-# ---------- vendor feeds (any RSS 2.0 or Atom) ----------
-
-ATOM = "{http://www.w3.org/2005/Atom}"
-
+# ---------- vendor feeds (RSS 2.0, RSS 1.0 or Atom) ----------
 
 def read_feeds(path):
-    """One feed per line: name|url. # starts a comment"""
+    """One feed per line: name|url"""
     out = []
-    with open(path) as f:
-        for line in f:
-            line = line.split("#", 1)[0].strip()
-            if not line:
-                continue
-            name, _, url = (p.strip() for p in line.partition("|"))
-            if not (name and url):
-                raise SystemExit(f"bad feed line: {line!r} (expected name|url)")
-            out.append((name, url))
+    for line in data_lines(path):
+        name, _, url = (p.strip() for p in line.partition("|"))
+        if not (name and url):
+            raise SystemExit(f"bad feed line: {line!r} (expected name|url)")
+        out.append((name, url))
     return out
 
 
 def feed_date(text):
-    if not text:
-        return ""
+    """YYYY-MM-DD from an RFC 822 or ISO 8601 date, or "" if the date cannot be read"""
+    text = (text or "").strip()
+    if re.match(r"\d{4}-\d{2}-\d{2}", text):
+        return text[:10]
     try:
         return parsedate_to_datetime(text).date().isoformat()
-    except (TypeError, ValueError):
-        return text[:10]  # Atom: ISO 8601
+    except (TypeError, ValueError, IndexError):
+        return ""
 
 
-def parse_vendor_feed(name, raw):
-    """Each entry is one item with one update. Its key is the feed name plus the entry link or id"""
-    try:
-        # S314: safe for the same reason as in rss_items
-        root = ET.fromstring(raw)  # noqa: S314
-        entries = list(root.iter("item")) or list(root.iter(ATOM + "entry"))
-    except ET.ParseError:
-        entries, _ = rss_items(raw)
+def entry_link(e):
+    """RSS <link>text</link>, or the Atom <link href> with rel="alternate" (the default rel)"""
+    for c in e:
+        if lname(c) == "link":
+            if (c.text or "").strip():
+                return c.text.strip()
+            if c.get("rel", "alternate") == "alternate" and c.get("href"):
+                return c.get("href")
+    return ""
+
+
+def parse_vendor_feed(name, raw, warnings=None):
+    """Each entry is one item. Its key is the feed name plus the entry id or link.
+    "sig" changes when the title or the CVE list changes: fetch turns that into an update"""
+    entries, warning = feed_entries(raw)
+    if warning and warnings is not None:
+        warnings.append(warning)
     items = []
     for e in entries:
-        title = e.findtext("title") or e.findtext(ATOM + "title") or ""
-        link = e.findtext("link") or ""
-        if not link:
-            le = e.find(ATOM + "link")
-            link = le.get("href", "") if le is not None else ""
-        ident = e.findtext("guid") or e.findtext(ATOM + "id") or link or title
-        date = feed_date(e.findtext("pubDate") or e.findtext(ATOM + "updated") or e.findtext(ATOM + "published"))
-        body = (e.findtext("description") or e.findtext("content:encoded", namespaces=NS)
-                or e.findtext(ATOM + "summary") or e.findtext(ATOM + "content") or "")
+        title = ctext(e, "title").strip()
+        link = entry_link(e)
+        ident = ctext(e, "guid", "id") or e.get("{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about") or link or title
+        date = feed_date(ctext(e, "pubDate", "updated", "published", "date"))
+        body = ctext(e, "description", "encoded", "summary", "content")
         text = strip_html(body)
+        cves = sorted(set(CVE_RE.findall(title + body)))
         items.append({
             "key": f"feed:{name}:{ident}",
             "source": f"feeds:{name}",
-            "title": title.strip(),
+            "title": title,
             "link": link,
             "date": date,
             "summary": text[:1500],
-            "cves": sorted(set(CVE_RE.findall(title + body))),
+            "cves": cves,
+            "sig": fp(title, *cves),
             "updates": [{"date": date, "text": "published", "id": fp("feed", name, ident)}],
             "text": text[:8000],
         })
@@ -252,36 +289,45 @@ def parse_kev(raw):
 # ---------- OSV ----------
 
 def read_packages(path):
-    """One package per line: ecosystem|name|version  (version may be empty). # starts a comment"""
+    """One package per line: ecosystem|name|version  (version may be empty)"""
     out = []
-    with open(path) as f:
-        for line in f:
-            line = line.split("#", 1)[0].strip()
-            if not line:
-                continue
-            parts = [p.strip() for p in line.split("|")]
-            if len(parts) < 2:
-                raise SystemExit(f"bad package line: {line!r} (expected ecosystem|name|version)")
-            out.append({"ecosystem": parts[0], "name": parts[1],
-                        "version": parts[2] if len(parts) > 2 else ""})
+    for line in data_lines(path):
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 2:
+            raise SystemExit(f"bad package line: {line!r} (expected ecosystem|name|version)")
+        out.append({"ecosystem": parts[0], "name": parts[1], "version": parts[2] if len(parts) > 2 else ""})
     return out
 
 
-def osv_fixed(vuln):
+def same_package(affected, pkg):
+    """Does an "affected" entry of an advisory name this package? Debian:12 matches Debian:12 exactly,
+    Debian matches any Debian release. PyPI names compare as PyPI normalizes them"""
+    eco, want = affected.get("ecosystem", "").lower(), pkg["ecosystem"].lower()
+    if eco != want and (":" in want or eco.split(":")[0] != want):
+        return False
+    norm = (lambda n: re.sub(r"[-_.]+", "-", n.lower())) if want == "pypi" else str.lower
+    return norm(affected.get("name", "")) == norm(pkg["name"])
+
+
+def osv_fixed(vuln, pkgs):
+    """Fixed versions of the user's packages only: one advisory can cover other packages and distributions"""
     fixed = set()
     for a in vuln.get("affected", []):
-        for r in a.get("ranges", []):
-            for e in r.get("events", []):
-                if "fixed" in e:
-                    fixed.add(e["fixed"])
+        if any(same_package(a.get("package", {}), p) for p in pkgs):
+            for r in a.get("ranges", []):
+                fixed.update(e["fixed"] for e in r.get("events", []) if "fixed" in e)
     return sorted(fixed)
 
 
-def osv_item(vuln, pkg):
+def osv_rev(modified, pkgs):
+    """Changes when the advisory or the matching packages change"""
+    return fp(modified, *(f"{p['ecosystem']}|{p['name']}|{p['version']}" for p in pkgs))
+
+
+def osv_item(vuln, pkgs):
     vid = vuln.get("id", "")
-    aliases = vuln.get("aliases", [])
     date = (vuln.get("published") or vuln.get("modified") or "")[:10]
-    fixed = osv_fixed(vuln)
+    fixed = osv_fixed(vuln, pkgs)
     item = {
         "key": f"osv:{vid}",
         "source": "osv",
@@ -289,10 +335,13 @@ def osv_item(vuln, pkg):
         "link": f"https://osv.dev/vulnerability/{vid}",
         "date": date,
         "summary": (vuln.get("details") or "")[:1500],
-        "cves": sorted(a for a in aliases if a.startswith("CVE-")),
-        "package": pkg,
+        "cves": sorted({a for a in [vid, *vuln.get("aliases", [])] if a.startswith("CVE-")}),
+        "package": pkgs[0],
+        "packages": pkgs,  # every package from the packages file that this advisory affects
         "fixed_versions": fixed,
         "severity": vuln.get("database_specific", {}).get("severity", ""),
+        "cvss": [s["score"] for s in vuln.get("severity", []) if s.get("score")],  # CVSS vectors
+        "rev": osv_rev(vuln.get("modified", ""), pkgs),
         "updates": [{"date": date, "text": "published", "id": fp("osv", vid)}],
         "text": "",
     }
@@ -303,27 +352,60 @@ def osv_item(vuln, pkg):
     return item
 
 
-def fetch_osv(packages, osv_file=None):
+def osv_get(api, vid):
+    return json.loads(http_get(api + "vulns/" + urllib.parse.quote(vid, safe="")))
+
+
+def fetch_osv(packages, known, api=OSV_API, osv_file=None):
+    """Returns items and errors. An advisory whose "modified" did not change since it was marked is not
+    downloaded again: it becomes a "cached" item with no updates, so only a new KEV status brings it back"""
+    hits, full, errors = {}, {}, []  # id -> [modified, [packages]]; id -> advisory
     if osv_file:  # offline: a JSON list of {"package": {...}, "vuln": {...}}
         with open(osv_file) as f:
-            return [osv_item(e["vuln"], e["package"]) for e in json.load(f)]
+            for e in json.load(f):
+                full[e["vuln"]["id"]] = e["vuln"]
+                hits.setdefault(e["vuln"]["id"], [e["vuln"].get("modified", ""), []])[1].append(e["package"])
     queries = []
     for p in packages:
         q = {"package": {"ecosystem": p["ecosystem"], "name": p["name"]}}
         if p["version"]:
             q["version"] = p["version"]
         queries.append(q)
-    items, seen = [], set()
-    for start in range(0, len(queries), 1000):
-        chunk = queries[start:start + 1000]
-        res = http_post_json(OSV_BATCH, {"queries": chunk})
-        for pkg, r in zip(packages[start:start + 1000], res.get("results", [])):
-            for v in r.get("vulns", []) or []:
-                if v["id"] in seen:
-                    continue
-                seen.add(v["id"])
-                items.append(osv_item(json.loads(http_get(OSV_VULN + v["id"])), pkg))
-    return items
+    todo, tokens = list(range(len(queries))) if not osv_file else [], {}
+    for _ in range(10):  # a package without a version can have more than one page of results
+        more = []
+        for start in range(0, len(todo), 1000):
+            chunk = todo[start:start + 1000]
+            res = http_post_json(api + "querybatch",
+                                 {"queries": [dict(queries[n], **({"page_token": tokens[n]} if n in tokens else {}))
+                                              for n in chunk]})
+            for n, r in zip(chunk, res.get("results", [])):
+                for v in r.get("vulns") or []:
+                    h = hits.setdefault(v["id"], [v.get("modified", ""), []])
+                    if packages[n] not in h[1]:
+                        h[1].append(packages[n])
+                if r.get("next_page_token"):
+                    tokens[n] = r["next_page_token"]
+                    more.append(n)
+        todo = more
+        if not todo:
+            break
+    if todo:
+        errors.append({"source": "osv", "error": f"{len(todo)} package(s) have more than 10 pages of results",
+                       "partial": True})
+    items = []
+    for vid, (modified, pkgs) in hits.items():
+        k = known.get(f"osv:{vid}")
+        if vid not in full and k and modified and k.get("rev") == osv_rev(modified, pkgs):
+            items.append({"key": f"osv:{vid}", "source": "osv", "title": k.get("title") or vid,
+                          "link": f"https://osv.dev/vulnerability/{vid}", "date": "", "cves": k.get("cves", []),
+                          "package": pkgs[0], "packages": pkgs, "updates": [], "cached": True})
+            continue
+        try:
+            items.append(osv_item(full.get(vid) or osv_get(api, vid), pkgs))
+        except Exception as e:  # one advisory that cannot be read must not hide the others
+            errors.append({"source": "osv", "error": f"{vid}: {type(e).__name__}: {e}", "partial": True})
+    return items, errors
 
 
 # ---------- enrichment ----------
@@ -367,13 +449,50 @@ def load_state(path):
     except FileNotFoundError:
         return None
     if st.get("version") == 2:  # vuln-digest prototype: {"slugs": {slug: {first_seen, updates}}}
-        st = {"version": STATE_VERSION, "last_digest": st.get("last_digest"),
+        st = {"version": 3, "last_digest": st.get("last_digest"),
               "items": {f"zerowire:{k}": {"first_seen": v.get("first_seen"), "fp": v.get("updates", []),
                                           "last_shown": st.get("last_digest") or v.get("first_seen")}
                         for k, v in st.get("slugs", {}).items()}}
+    if st.get("version") == 3:  # v4 adds "sources": the sources read in full, see baseline()
+        src = {}
+        for k in st["items"]:
+            kind, _, rest = k.partition(":")
+            src["feeds:" + rest.split(":", 1)[0] if kind == "feed" else kind] = st.get("last_digest") or "v3"
+        st.update(version=4, sources=src)
     if st.get("version") != STATE_VERSION:
         raise SystemExit(f"{path}: unknown state version {st.get('version')!r}")
+    st.setdefault("sources", {})
     return st
+
+
+META = ("cves", "sig", "rev")  # kept in the state: CVEs for cross-source links, "sig" and "rev" to see changes
+
+
+def prev_day(d):
+    return (datetime.date.fromisoformat(d) - datetime.timedelta(days=1)).isoformat()
+
+
+def baseline(st, items, done, today, since):
+    """Count old updates of a source as seen when it is read for the first time, so that a new feed,
+    or a source that failed on the first run, does not flood the digest with its archive.
+    The cut-off: --since if given; the first run's --since for a source that failed on that run;
+    otherwise the day before the last digest. Returns True if the state changed"""
+    pending = {k for k, v in st["sources"].items() if v is None}
+    changed = False
+    for sid in sorted(done | {i["source"] for i in items}):
+        if st["sources"].get(sid):
+            continue
+        if since:
+            cutoff = since
+        elif sid in pending or sid.split(":")[0] in pending or not st.get("last_digest"):
+            cutoff = st.get("since") or today
+        else:
+            cutoff = prev_day(st["last_digest"])
+        mark(st, [i for i in items if i["source"] == sid], today, only_before=cutoff)
+        if sid in done:  # a source read only in part stays pending: the rest is counted next time
+            st["sources"][sid] = cutoff
+        changed = True
+    return changed
 
 
 def save_json(path, obj):
@@ -385,11 +504,13 @@ def save_json(path, obj):
 
 def mark(state, items, today, only_before=None):
     for i in items:
-        ids = {u["id"] for u in i["updates"] if only_before is None or u["date"] < only_before}
+        # an update without a date is never older than the cut-off: it is shown once, not hidden for good
+        ids = {u["id"] for u in i["updates"] if only_before is None or "" < u["date"] < only_before}
         if not ids:
             continue
         s = state["items"].setdefault(i["key"], {"first_seen": today, "fp": []})
         s["fp"] = sorted(set(s["fp"]) | ids)
+        s.update({f: i[f] for f in META if i.get(f)})
         if only_before is None:  # delivered now: keep what the weekly summary and "I patched X" need
             last = max(i["updates"], key=lambda u: u["date"])
             s.update({"title": i.get("title"), "link": i.get("link"), "cves": i.get("cves", []),
@@ -403,9 +524,10 @@ def mark(state, items, today, only_before=None):
 
 # ---------- main ----------
 
-def collect(a):
+def collect(a, known):
+    """Returns items, errors, the sources asked for, and the ids of the sources read in full"""
     sources = [s.strip() for s in a.sources.split(",") if s.strip()]
-    items, errors, kev_items = [], [], []
+    items, errors, kev_items, done = [], [], [], set()
     for src in sources:
         try:
             if src == "zerowire":
@@ -422,16 +544,23 @@ def collect(a):
                     raise ValueError("feeds needs --feeds FILE")
                 for name, url in read_feeds(a.feeds):
                     try:
-                        raw = open(url[7:], "rb").read() if url.startswith("file://") else http_get(url)
-                        items += parse_vendor_feed(name, raw)
+                        warnings = []
+                        items += parse_vendor_feed(name, http_get(url), warnings)
+                        errors += [{"source": f"feeds:{name}", "error": w, "partial": True} for w in warnings]
+                        if not warnings:
+                            done.add(f"feeds:{name}")
                     except Exception as e:
                         errors.append({"source": f"feeds:{name}", "error": f"{type(e).__name__}: {e}"})
             elif src == "osv":
                 if not (a.packages or a.osv_file):
                     raise ValueError("osv needs --packages FILE")
-                items += fetch_osv(read_packages(a.packages) if a.packages else [], a.osv_file)
+                found, errs = fetch_osv(read_packages(a.packages) if a.packages else [], known, a.osv_api, a.osv_file)
+                items += found
+                errors += errs
             else:
                 raise ValueError(f"unknown source {src!r}")
+            if not any(e["source"] == src for e in errors):
+                done.add(src)
         except Exception as e:  # one source down must not hide the others
             errors.append({"source": src, "error": f"{type(e).__name__}: {e}"})
     if kev_items:
@@ -439,7 +568,27 @@ def collect(a):
         # a KEV entry whose CVE is already part of another item is shown inside that item
         covered = {c for i in items if i["source"] != "kev" for c in i.get("kev_cves", {})}
         items = [i for i in items if not (i["source"] == "kev" and i["cves"][0] in covered)]
-    return items, errors, sources
+    return items, errors, sources, done
+
+
+def link_same_cves(result, state_items):
+    """One vulnerability often comes from several sources. Point at the other items, in this run and
+    already delivered, so the digest can show it once"""
+    by_cve, delivered = {}, {}
+    for i in result:
+        for c in i["cves"]:
+            by_cve.setdefault(c, set()).add(i["key"])
+    for k, v in state_items.items():
+        if v.get("last_shown"):
+            for c in v.get("cves") or []:
+                delivered.setdefault(c, k)
+    for i in result:
+        same = sorted({k for c in i["cves"] for k in by_cve[c]} - {i["key"]})
+        if same:
+            i["same_cve_items"] = same
+        earlier = {c: delivered[c] for c in i["cves"] if delivered.get(c, i["key"]) != i["key"]}
+        if earlier:
+            i["cves_delivered_in"] = earlier
 
 
 def main():
@@ -452,19 +601,22 @@ def main():
     ap.add_argument("--epss", action="store_true", help="add EPSS scores to the result")
     ap.add_argument("--kev-max-age", type=int, default=30,
                     help="show KEV entries added in the last N days only (default 30)")
-    ap.add_argument("--since", metavar="YYYY-MM-DD", help="first run without state: updates before this day count as seen")
+    ap.add_argument("--since", metavar="YYYY-MM-DD",
+                    help="first run without state: updates before this day count as seen. "
+                         "With a state: the same, for sources read for the first time")
     ap.add_argument("--all", action="store_true", help="preview everything, state is not used")
     ap.add_argument("--state", default=os.path.join(HERE, "state.json"))
     ap.add_argument("--snapshot", default=os.path.join(HERE, "last_run.json"))
     ap.add_argument("--zerowire-file")
     ap.add_argument("--kev-file")
     ap.add_argument("--osv-file")
+    ap.add_argument("--osv-api", default=OSV_API, help=argparse.SUPPRESS)
     ap.add_argument("--today", default=datetime.date.today().isoformat(), help=argparse.SUPPRESS)
     a = ap.parse_args()
     today = a.today
 
     if a.command == "mark":
-        st = load_state(a.state) or {"version": STATE_VERSION, "items": {}}
+        st = load_state(a.state) or {"version": STATE_VERSION, "items": {}, "sources": {}}
         try:
             with open(a.snapshot) as f:
                 snap = json.load(f)
@@ -473,6 +625,9 @@ def main():
         for i in snap["items"]:  # mark only the updates that were shown
             i["updates"] = i["new_updates"]
         mark(st, snap["items"], today)
+        for k, meta in snap.get("meta", {}).items():  # what fetch learned about items it did not show
+            if k in st["items"]:
+                st["items"][k].update(meta)
         st["last_digest"] = snap["date"]
         save_json(a.state, st)
         os.remove(a.snapshot)
@@ -491,34 +646,52 @@ def main():
         print()
         return
 
-    items, errors, sources = collect(a)
+    st = None if a.all else load_state(a.state)
+    if st is None and not a.all and not a.since:
+        raise SystemExit("state.json not found. Restore it from durable storage, or run again with "
+                         "--since <date of the last digest> (for a first run: today minus the lookback)")
+    items, errors, sources, done = collect(a, st["items"] if st else {})
     if "kev" in sources:  # the KEV catalog holds 1000+ entries; only recent ones are news
         cutoff = (datetime.date.fromisoformat(today) - datetime.timedelta(days=a.kev_max_age)).isoformat()
         items = [i for i in items if i["source"] != "kev" or i["date"] >= cutoff]
 
-    st = None if a.all else load_state(a.state)
-    if st is None and not a.all:
-        if not a.since:
-            raise SystemExit("state.json not found. Restore it from durable storage, or run again with "
-                             "--since <date of the last digest> (for a first run: today minus the lookback)")
-        st = {"version": STATE_VERSION, "items": {}, "last_digest": None}
-        mark(st, items, today, only_before=a.since)
-        save_json(a.state, st)
+    if not a.all:
+        first = st is None
+        if first:  # a source that failed now is pending: it gets the same cut-off when it answers
+            st = {"version": STATE_VERSION, "items": {}, "last_digest": None, "since": a.since,
+                  "sources": {e["source"]: None for e in errors}}
+        if baseline(st, items, done, today, a.since) or first:
+            save_json(a.state, st)
 
-    result = []
+    result, meta = [], {}
     for i in items:
         known = None if a.all else st["items"].get(i["key"])
         if known is None:
             i["status"], i["new_updates"] = "new", i["updates"]
         else:
+            if i.get("sig") and known.get("sig") and known["sig"] != i["sig"]:
+                added = sorted(set(i["cves"]) - set(known.get("cves") or []))
+                i["updates"].append({"date": i["date"] or today, "id": fp("changed", i["key"], i["sig"]),
+                                     "text": "advisory changed" + (": adds " + ", ".join(added) if added else "")})
+            meta[i["key"]] = {f: i[f] for f in META if i.get(f) and i[f] != known.get(f)}
             seen = set(known["fp"])
             fresh = [u for u in i["updates"] if u["id"] not in seen and u.get("legacy") not in seen]
             if not fresh:
                 continue
+            if i.pop("cached", False):  # an advisory that was not downloaded: get it now to show it
+                try:
+                    full = osv_item(osv_get(a.osv_api, i["key"][4:]), i["packages"])
+                except Exception as e:
+                    errors.append({"source": "osv", "error": f"{i['key']}: {type(e).__name__}: {e}"})
+                    continue
+                full["updates"] += i["updates"]
+                full.update({k: v for k, v in i.items() if k == "kev_cves"})
+                i = full
             # "updated" only for an item the user has seen; one known only from a --since rebuild is new to them
             i["status"] = "updated" if known.get("last_shown") else "new"
             i["new_updates"] = fresh
         result.append(i)
+    link_same_cves(result, {} if a.all else st["items"])
 
     if a.epss and result:
         try:
@@ -531,7 +704,7 @@ def main():
            "last_digest": None if a.all else st.get("last_digest"),
            "errors": errors, "items": result}
     if not a.all:
-        save_json(a.snapshot, {"date": today, "items": result})
+        save_json(a.snapshot, {"date": today, "items": result, "meta": {k: v for k, v in meta.items() if v}})
     json.dump(out, sys.stdout, ensure_ascii=False, indent=1)
     print()
 
