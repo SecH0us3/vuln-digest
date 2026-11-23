@@ -53,6 +53,11 @@ class Server:
                 if page is None:
                     self.send_error(404)
                     return
+                if isinstance(page, tuple):
+                    self.send_response(page[0])
+                    self.send_header("Location", page[1])
+                    self.end_headers()
+                    return
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(page if isinstance(page, bytes) else page.encode())
@@ -130,16 +135,23 @@ class VulnStackTest(unittest.TestCase):
                     "version": "2.1.0",
                     "resolved": "https://registry.npmjs.org/@acme/auth/-/auth-2.1.0.tgz",
                 },
+                "node_modules/injected": {
+                    "version": "1.0.0\nnpm|@corp/secret|9.9.9",
+                    "resolved": "https://registry.npmjs.org/injected/-/injected-1.0.0.tgz",
+                },
             },
         }
         write(os.path.join(self.dir, "package-lock.json"), json.dumps(lock))
+        outside = os.path.join(self.dir, "outside-secret.txt")
+        write(outside, "secret==1.2.3\n")
+        os.symlink(outside, os.path.join(self.dir, "requirements.txt"))
         out_pkg = os.path.join(self.dir, "packages.txt")
         out_dev = os.path.join(self.dir, "packages-dev.txt")
         rep = json.loads(self.run_tool("scan", self.dir, "--out", out_pkg, "--dev-out", out_dev).stdout)
         self.assertEqual(lines(out_pkg), ["npm|express|4.21.1"])
         self.assertEqual(lines(out_dev), ["npm|jest|29.7.0"])
         self.assertEqual(rep["skipped_dev"], 1)
-        self.assertEqual(rep["skipped_private"], 2)  # local-lib + internal-sdk
+        self.assertEqual(rep["skipped_private"], 3)  # local-lib + internal-sdk + injected newline/pipe
         suspects = {s["scope"]: s["count"] for s in rep["suspects"]}
         self.assertEqual(suspects, {"@acme": 2, "@aws-sdk": 1})
 
@@ -267,9 +279,15 @@ class VulnStackTest(unittest.TestCase):
               "golang.org/x/net v0.1.0 h1:a\ngolang.org/x/net v0.1.0/go.mod h1:b\n"
               "golang.org/x/net v0.20.0/go.mod h1:c\ngolang.org/x/net v0.20.0-rc.1 h1:d\n"
               "golang.org/x/net v0.9.0 h1:e\n")
-        # old go.mod (before 1.17) lists only direct requires, so go.sum is still read
-        write(os.path.join(self.dir, "old", "go.mod"), "module example.com/old\n\ngo 1.16\n")
-        write(os.path.join(self.dir, "old", "go.sum"), "github.com/pkg/errors v0.9.1 h1:x\n")
+        # old go.mod (before 1.17) lists only direct requires, so go.sum is still read for transitives
+        # without duplicating modules already in go.mod; remote replace substitutes the target module+version
+        write(os.path.join(self.dir, "old", "go.mod"),
+              "module example.com/old\n\ngo 1.16\n\n"
+              "require (\n\tgithub.com/pkg/errors v0.8.0\n\tgithub.com/old/dep v1.0.0\n)\n\n"
+              "replace github.com/old/dep => github.com/fork/dep v1.2.3\n")
+        write(os.path.join(self.dir, "old", "go.sum"),
+              "github.com/pkg/errors v0.9.1 h1:x\n"
+              "github.com/stretchr/testify v1.9.0 h1:y\n")
         cdx = {"bomFormat": "CycloneDX", "components": [
             {"purl": "pkg:rpm/redhat/openssl@3.0.7-27.el9"},
             {"purl": "pkg:rpm/opensuse/curl@8.6.0-1.1"},
@@ -289,7 +307,9 @@ class VulnStackTest(unittest.TestCase):
         rep = json.loads(self.run_tool("scan", self.dir, "--out", out_pkg).stdout)
         self.assertEqual(set(lines(out_pkg)), {
             "Go|golang.org/x/net|0.20.0",
-            "Go|github.com/pkg/errors|0.9.1",
+            "Go|github.com/pkg/errors|0.8.0",
+            "Go|github.com/fork/dep|1.2.3",
+            "Go|github.com/stretchr/testify|1.9.0",
             "Red Hat|openssl|3.0.7-27.el9",
             "openSUSE|curl|8.6.0-1.1",
             "GitHub Actions|actions/checkout|v4.2.2",
@@ -370,9 +390,15 @@ class VulnStackTest(unittest.TestCase):
             return json.dumps(payload)
 
         self.server.pages["/cpes"] = serve
+        alt_url = self.server.url.replace("127.0.0.1", "localhost")
+        self.server.pages["/redir-cpes"] = (302, f"{alt_url}/cpes?keywordSearch=fortios")
+        self.server.pages["/ftp-cpes"] = (302, "ftp://example.com/cpes")
         out = json.loads(self.run_tool("find-cpe", "fortios", "--nvd-cpe-api", self.server.url + "/cpes",
                                        env={"NVD_API_KEY": "example"}).stdout)
-        self.assertEqual(seen_key, ["example"])
+        self.run_tool("find-cpe", "fortios", "--nvd-cpe-api", self.server.url + "/redir-cpes",
+                      env={"NVD_API_KEY": "example"})
+        self.assertEqual(seen_key, ["example", None])  # cross-origin redirect strips apiKey
+        self.assertNotEqual(self.run_tool("find-cpe", "fortios", "--nvd-cpe-api", self.server.url + "/ftp-cpes", ok=False).returncode, 0)
         self.assertEqual(out["prefixes"][0]["cpe"], "cpe:2.3:o:fortinet:fortios")
         self.assertEqual(out["prefixes"][0]["matches"], 2)  # deprecated excluded
 

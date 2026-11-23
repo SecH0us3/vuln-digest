@@ -2,7 +2,7 @@
 
 This file is a task for an AI assistant: Claude, ChatGPT, Gemini, Codex, Cursor or any other. The user gives the assistant this file and asks it to set up a vulnerability digest. The address of this file is https://vuln-digest.secmy.app/README.md
 
-Version: 1.6.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
+Version: 1.6.1. The current version and what changed are at https://vuln-digest.secmy.app/version.json
 
 If you are a person, the overview is at https://vuln-digest.secmy.app/ - give the address of this file to your AI assistant and it does the rest
 
@@ -127,7 +127,7 @@ When you can run Python, use `vuln_stack.py scan` (see "Helper scripts") instead
 
 | What | Where to look |
 |---|---|
-| packages and versions | lock files first: `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `packages.lock.json`, `Directory.Packages.props`, `*.csproj`, `poetry.lock`, `uv.lock`, `requirements*.txt`, `go.sum`, `Cargo.lock`, `Gemfile.lock`, `composer.lock`, `pom.xml`, `gradle.lockfile`, `pubspec.lock` |
+| packages and versions | lock files first: `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `packages.lock.json`, `Directory.Packages.props`, `*.csproj`, `poetry.lock`, `uv.lock`, `requirements*.txt`, `go.mod`, `go.sum`, `Cargo.lock`, `Gemfile.lock`, `composer.lock`, `pom.xml`, `gradle.lockfile`, `pubspec.lock` |
 | runtimes and base images | `Dockerfile*` (`FROM` lines), `.nvmrc`, `.python-version`, `global.json`, `go.mod` (`go` line), `.tool-versions` |
 | infrastructure | Terraform providers and modules, Helm charts and their images, Kubernetes manifests (images, ingress controller), Ansible roles |
 | CI | the CI system and the actions or images it uses |
@@ -310,7 +310,7 @@ python3 -I vuln_feed.py fetch --sources zerowire,kev,feeds,osv,ghsa,nvd \
 
 Zero Wire and KEV cover only a few of the most important vulnerabilities each week. A product in focus that ships regular security releases (a runtime, a framework, a web server) needs its own source, or its releases never reach the digest. At setup, start with `vuln_stack.py suggest-sources --stack <products>`: it matches the confirmed stack against `catalog.json` and proposes verified entries for `feeds.txt`, `ghsa.txt` and `nvd.txt`. For products not in the catalog, use `vuln_stack.py discover-feeds <vendor-security-page>` to find RSS, Atom or GitHub Security Advisories links, or `vuln_stack.py find-cpe <product>` to look up real NVD CPE prefixes instead of guessing. Always run `vuln_feed.py check-feeds --feeds feeds.txt` before putting feeds into the job: drop or replace a feed it reports a problem with (an HTML page instead of a feed, no entries, or a blog whose entries name no CVE)
 
-For open-source products in focus that publish GitHub Security Advisories instead of an RSS feed (such as Kubernetes, Grafana, Traefik or Envoy), list their repositories in `ghsa.txt` as `owner/repo` and turn on `ghsa`. A line `package|<ecosystem>|<name>`, such as `package|npm|next`, reads the reviewed advisories that affect that one package. OSV already includes those, so use it only without a packages file. For network, VPN or proprietary products with neither a vendor feed nor a GitHub repository (such as FortiGate, PAN-OS or ESXi), list verified CPE prefixes in `nvd.txt` as `name|cpe:2.3:...` and turn on `nvd`. Optional `GITHUB_TOKEN` and `NVD_API_KEY` environment variables raise the API limits - keep them in the platform's secret storage, never in files or command-line flags (rule 8). If a product still has no feed or API, read its security page on each run by hand and give its entries keys of the form `page:<name>:<url>`
+For open-source products in focus that publish GitHub Security Advisories instead of an RSS feed (such as Traefik, Envoy, Redis or Argo CD), list their repositories in `ghsa.txt` as `owner/repo` and turn on `ghsa`. A line `package|<ecosystem>|<name>`, such as `package|npm|next`, reads the reviewed advisories that affect that one package. OSV already includes those, so use it only without a packages file. For network, VPN or proprietary products with neither a vendor feed nor a GitHub repository (such as FortiGate, PAN-OS or ESXi), list verified CPE prefixes in `nvd.txt` as `name|cpe:2.3:...` and turn on `nvd`. Optional `GITHUB_TOKEN` and `NVD_API_KEY` environment variables raise the API limits - keep them in the platform's secret storage, never in files or command-line flags (rule 8). If a product still has no feed or API, read its security page on each run by hand and give its entries keys of the form `page:<name>:<url>`
 
 The output is JSON: `items` (only new and updated items, each with `status` new or updated and `new_updates`), `errors` (sources that failed, and `"partial": true` for a source that was read only in part, for example a feed cut off in transfer) and `last_digest`. The script saves the same items into `last_run.json`
 
@@ -345,7 +345,7 @@ KEV entries have `ransomware`: `Known` means the CVE is used in ransomware campa
 
 EPSS is a probability of exploitation in the next 30 days. Show it as a percent next to the CVE when it is known, and use a high EPSS to move an item up one level, never down
 
-`cve_details` (from `--cve-details`) adds CVSS scores and affected version ranges from CVE.org for items that lacked them, such as KEV entries and short vendor bulletins. GHSA and NVD items include `cvss_score` and `severity` directly
+`cve_details` (from `--cve-details`) adds CVSS scores and affected version ranges from CVE.org for items that lacked them, such as KEV entries and short vendor bulletins. GHSA and NVD items include `cvss_score`, `severity` and known affected or fixed versions directly
 
 ### R5. Find what to do
 
