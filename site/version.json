@@ -1,6 +1,15 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
+  "sha256": {
+    "README.md": "6057be3376e7f3d2ecaf967ae25b1ee3b20049de5596ce2d9c810d1afd3ed569",
+    "vuln_feed.py": "62d04f42d1c0c541cf9bb91200b79d38c4be8cf068a06bc50e550da8eecb7cff"
+  },
   "releases": [
+    {
+      "version": "1.4.0",
+      "date": "2026-11-23",
+      "summary": "New command check-feeds tests vendor feeds at setup; a preview digest before the questions; new replies: not affected, snooze, pause until, check CVE, status; version.json has SHA-256 checksums"
+    },
     {
       "version": "1.3.0",
       "date": "2026-11-23",

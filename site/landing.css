@@ -202,3 +202,6 @@ td:first-child { width: 3.2rem; text-align: center; white-space: nowrap; }
 .foot-h { font: 600 0.72rem var(--mono); letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 0.5rem; color: var(--desk-muted); }
 .brand.small { margin: 0 0 0.5rem; }
 .muted { color: var(--desk-muted); margin: 0; font-family: var(--type); }
+
+/* text for screen readers only: the live region of the Copy buttons */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

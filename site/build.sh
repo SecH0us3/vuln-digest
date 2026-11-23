@@ -30,6 +30,7 @@ docker run --rm \
   --metadata lang=en \
   --css ../style.css \
   --include-in-header site/head.html \
+  --include-before-body site/header.html \
   --include-after-body site/footer.html \
   --output /out/docs/index.html \
   README.md

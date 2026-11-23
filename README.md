@@ -2,7 +2,7 @@
 
 This file is a task for an AI assistant: Claude, ChatGPT, Gemini, Codex, Cursor or any other. The user gives the assistant this file and asks it to set up a vulnerability digest. The address of this file is https://vuln-digest.secmy.app/README.md
 
-Version: 1.3.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
+Version: 1.4.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
 
 If you are a person, the overview is at https://vuln-digest.secmy.app/ - give the address of this file to your AI assistant and it does the rest
 
@@ -15,6 +15,8 @@ The work has three stages:
 - **Stage 1 - interview.** Do steps 0, 1 and 2: look at what the user's tools already show you, ask the user the questions, then write the profile
 - **Stage 2 - setup.** Do steps 3-6: choose where the state lives, create the schedule, set up the delivery, make a test run and show it to the user
 - **Stage 3 - every run.** The scheduled job follows the "Run" section. You write the prompt for that job in step 6, and that prompt tells the job to read this file
+
+**Before step 0, check what this platform can do,** without asking the user. Find out from your own tools and the platform's documentation: can you keep files between runs, can you run Python with network access, is there a scheduler and what is its shortest interval, which connectors and delivery channels you have. Offer only what works here. Do not promise urgent alerts every 2 hours on a platform that runs a job once a day, or a packages file on a platform without files. If something the user asks for is not possible here, say so once and offer the closest option
 
 The setup is done when the user has seen a test digest, the schedule exists and you have shown the user when the next run is, and the user knows how to change the settings (the "Feedback" section)
 
@@ -88,11 +90,12 @@ Ask step by step, not all at once. A wall of thirteen questions gets answered "d
 Ask in this order. Skip a question that step 0 or an earlier answer already settled
 
 1. **The stack** - questions 1, 2 and 13. If step 0 found the stack, this round is only its confirmation (step 0, point 3). These answers are free text: ask them as text, or as choices only where you have a guess to offer, such as "nginx and PHP 8.3 are in production: yes / no / partly"
-2. **Shortcut** - one question: "Keep the defaults for everything else, or go through it?" with the two choices and a one-line summary of the defaults: when it runs, where it goes, what it shows. If the user keeps the defaults, skip to the last round
-3. **When** - questions 5, 6, 7 and 8. For question 5, offer "weekdays at 08:00", "daily at 08:00", "weekly on Monday" and let the user type another time. Ask for the time zone only if you do not know it
-4. **What** - questions 3, 4, 10 and 12
-5. **Where and from what** - questions 9 and 11. Offer as choices only the delivery channels this platform can reach (step 5). For question 11 offer "the defaults" and the optional sources that fit the stack, as a multiple choice
-6. **Check** - show the answers in one short list and ask "Is this right?" with "yes, write the profile" and "change something". Then go to step 2
+2. **Preview** - if you can fetch the sources now, show a short preview before the other questions: what the last 7 days would look like for this stack, in the short format, five to ten lines. Use `fetch --all`, which does not touch any state, or read the sources by hand. It is easier to answer "what should I never show" and "how detailed" with a real example in front of you. Say it is a preview and that nothing is scheduled yet
+3. **Shortcut** - one question: "Keep the defaults for everything else, or go through it?" with the two choices and a one-line summary of the defaults: when it runs, where it goes, what it shows. If the user keeps the defaults, skip to the last round
+4. **When** - questions 5, 6, 7 and 8. For question 5, offer "weekdays at 08:00", "daily at 08:00", "weekly on Monday" and let the user type another time. Ask for the time zone only if you do not know it
+5. **What** - questions 3, 4, 10 and 12
+6. **Where and from what** - questions 9 and 11. Offer as choices only the delivery channels this platform can reach (step 5). For question 11 offer "the defaults" and the optional sources that fit the stack, as a multiple choice
+7. **Check** - show the answers in one short list and ask "Is this right?" with "yes, write the profile" and "change something". Then go to step 2
 
 The table lists every question, why it matters and its default. Ask in the user's words, not as table rows
 
@@ -175,7 +178,9 @@ sources: [zerowire, kev, feeds]  # see "Sources". Add osv if there is a packages
 
 boost: []                    # filled from feedback: topics the user wants more of
 less: []                     # filled from feedback: topics the user wants less of
-patched: []                  # "I fixed X": { item: <key>, until: <date> } - do not remind about it
+patched: []                  # { item: <key>, until: <date>, why: patched | not_affected | snoozed } - do not remind
+paused_until: null           # "pause until <date>": no digests until then, see R1
+pause_alerts: false          # true: no urgent alerts during the pause either
 ```
 
 The packages file has one package per line in the form `ecosystem|name|version`, with ecosystem names as OSV uses them (for example `npm`, `PyPI`, `NuGet`, `Go`, `Maven`, `crates.io`, `RubyGems`, `Packagist`). Check the current list of ecosystem names in the OSV documentation
@@ -192,6 +197,12 @@ Choose the first option that this platform supports:
 2. **A private git repository** - the job reads the state at the start and commits it at the end. This is the default for GitHub Actions (step 4)
 3. **A durable store of the platform** - a document, a database or a key-value store that the job can read and write. Use it only if the user agrees to keep the state there
 4. **No storage at all** - the "stateless mode": the job only shows updates dated after the previous scheduled run, with a small overlap. Tell the user that in this mode an item can sometimes appear twice, and that a status change of an old item can be missed
+
+In the stateless mode, the parts that need the state work differently:
+
+- the weekly summary takes "still open" from the digests the job delivered in the last 4 weeks, if it can read them (the chat history, the files, the issues). If it cannot, leave "still open" out and say so once;
+- urgent alerts need a second job with its own state, so there are none. Put urgent items at the top of the daily digest instead, and tell the user at setup;
+- `patched`, `ignore` and the other feedback live in the profile, which is part of the job prompt. A change needs a new job prompt: tell the user that the agent that set up the digest can make it
 
 Whatever you choose:
 
@@ -225,7 +236,8 @@ For GitHub Actions:
 - the workflow token gets only `contents: write`, for the state commit. The API key of the agent CLI and the delivery tokens go into repository secrets;
 - pin every action by its full commit SHA, read from GitHub at the moment you write the workflow;
 - set `concurrency` so two runs never write the state at the same time;
-- a scheduled workflow in a repository with no activity can be paused by GitHub after a while. Check the current rule in the GitHub documentation and tell the user
+- a scheduled workflow in a repository with no activity can be paused by GitHub after a while. Check the current rule in the GitHub documentation and tell the user;
+- run the helper script before the agent CLI. If `items` and `errors` are both empty, and today is not the weekly summary day or the update check day, do not start the agent: most days are quiet, and the agent is the expensive part. With `quiet_day: one_line`, the workflow sends the line "Nothing new for your stack since <date>. Sources checked: <list>" itself. Then it runs `mark` and commits the state, as on any other day
 
 ## Step 5. Set up the delivery
 
@@ -276,6 +288,8 @@ These are the steps of every scheduled run
 
 Read the profile. Read the state. If the state is missing, restore it from the durable copy. If there is no copy, rebuild it from the date of the last digest (step 3): look for it in the delivered digests (the last file, message or issue). If that date is unknown too, use today minus `lookback_days`. Say in the digest that the state was rebuilt
 
+If the profile has `paused_until` and today is before that date, stop here: send nothing and do not mark. The items wait, and the first digest after the pause covers the whole pause. Urgent alerts go on during a pause, unless the profile says `pause_alerts: true`
+
 ### R2. Fetch the sources
 
 With the helper script (see "Helper script"):
@@ -286,7 +300,7 @@ python3 -I vuln_feed.py fetch --sources zerowire,kev --epss
 python3 -I vuln_feed.py fetch --sources zerowire,kev,feeds,osv --feeds feeds.txt --packages packages.txt --epss
 ```
 
-Zero Wire and KEV cover only a few of the most important vulnerabilities each week. A product in focus that ships regular security releases (a runtime, a framework, a web server) needs its own feed, or its releases never reach the digest. At setup, find the official security feed (RSS or Atom) of each product in focus, check it in the vendor's documentation, and list it in `feeds.txt` as `name|url`. If a product has no feed, read its security page on each run by hand and give its entries keys of the form `page:<name>:<url>`
+Zero Wire and KEV cover only a few of the most important vulnerabilities each week. A product in focus that ships regular security releases (a runtime, a framework, a web server) needs its own feed, or its releases never reach the digest. At setup, find the official security feed (RSS or Atom) of each product in focus, check it in the vendor's documentation, and list it in `feeds.txt` as `name|url`. Then run `vuln_feed.py check-feeds --feeds feeds.txt`: it reads each feed once and shows its format, entries, newest date and whether the entries name CVE ids. Drop or replace a feed it reports a problem with: an HTML page instead of a feed, no entries, or a blog whose entries name no CVE. If a product has no feed, read its security page on each run by hand and give its entries keys of the form `page:<name>:<url>`
 
 The output is JSON: `items` (only new and updated items, each with `status` new or updated and `new_updates`), `errors` (sources that failed, and `"partial": true` for a source that was read only in part, for example a feed cut off in transfer) and `last_digest`. The script saves the same items into `last_run.json`
 
@@ -304,7 +318,7 @@ For each item decide: **in focus**, **outside the stack** or **ignored**
 - an item that matches `boost` is in focus even if it is outside the stack. An item that matches `less` gets one line, even if it is in focus;
 - if the profile or the packages file has a version, and the item lists affected versions, say whether the user's version is affected. If the user's version is already the fixed one or later, the item is **info**, never higher, with one line such as "you run 8.4.29, fixed in 8.4.28: not affected". If you cannot tell, say "check your version" and give the command to check it;
 - drop items that match `ignore`, and items outside the stack that are below the `outside_stack` threshold;
-- drop items in `patched` until the date given there, unless they have an update that changes the risk (exploitation started, the fix was incomplete)
+- drop items in `patched` until the date given there, unless they have an update that changes the risk (exploitation started, the fix was incomplete). When a `snoozed` entry ends, show the item again as an update: "snoozed until <date>, still open"
 
 ### R4. Rate each item
 
@@ -410,7 +424,7 @@ Only the new update, in one or two lines, and a link to the earlier digest
 Nothing new for: .NET, Chrome, Google Cloud
 
 ---
-Reply "more about X", "less about Y", "hide Z" or "I patched X" and the next digests will follow it
+Reply "more about X", "less about Y", "hide Z", "I patched X" or "status" and the next digests will follow it
 ```
 
 Rules for the format:
@@ -458,7 +472,12 @@ The user changes the digest by answering it in plain words. Change the profile, 
 | "more about X" | add X to `boost`: show X items as in focus even if they are outside the stack |
 | "less about X" | add X to `less`: show X items as one line, even if they are in focus |
 | "hide X" | add X to `ignore` |
-| "I patched X" | add the item to `patched` with a date 90 days ahead. Find its key with `vuln_feed.py history` |
+| "I patched X" | add the item to `patched` with a date 90 days ahead and `why: patched`. Find its key with `vuln_feed.py history` |
+| "not affected by X" | the same, with `why: not_affected`: the user checked and the bug does not apply. It is not counted as "still open" |
+| "snooze X for 2 weeks", "until the maintenance window" | add the item to `patched` until that date, with `why: snoozed`. When the date passes, it comes back once as still open |
+| "pause until <date>", "I am on holiday" | set `paused_until`. Say that urgent alerts go on, unless the user also says "pause alerts" (`pause_alerts: true`) |
+| "check CVE-YYYY-NNNN", "am I affected by <name>" | a one-off answer, nothing changes: read what the sources say about it (`fetch --all`, an OSV query for the packages file, the vendor's advisory), match it to the stack as in R3 and R4, and answer in a few lines with the source links |
+| "status" | answer in a few lines: the date of the last digest (`last_digest` in the state), the next run, the sources and which failed last time, what is in `ignore`, `less` and `patched`, and `paused_until` |
 | "I also use X", "I no longer use X" | change `stack` |
 | "refresh packages" | read the lock files again (step 0) and write the packages file anew. Show what changed |
 | "send it at 9", "only on Mondays" | change the schedule and `schedule`, say the next run time |
@@ -487,7 +506,7 @@ Check once a week: on the weekly summary day, or on the first run of the week if
 
 1. get the new `README.md` and `vuln_feed.py` from this site, or from the plugin if the user installed vuln-digest as a Claude Code plugin and updated it. Keep them next to the old copies under other names;
 2. compare the old and the new files and show the user what changed, in their language. Name in particular: sources added or removed and the addresses they contact, new commands the job runs, any change to what leaves the user's machine (OSV queries, delivery), new questions in step 1;
-3. read the whole new script before you run it, as at setup;
+3. compare the SHA-256 of both files with `sha256` in `version.json`. If they differ, the download is incomplete or the site is half updated: stop and try again later. The checksums come from the same site, so they catch a broken download, not a forged one. Then read the whole new script before you run it, as at setup;
 4. replace the copies only after the user agrees. Keep the profile and the state, and save the state to the durable copy first. If the new version adds questions to step 1, ask them now and update the profile;
 5. if the job prompt from step 6 changed, update the scheduled job;
 6. make a preview run with `--all`, which does not touch the state, and show it
@@ -496,7 +515,7 @@ If the user declines, keep the old copies. The job will mention the new version 
 
 ### Versions
 
-`version.json` has `version`, the current version, and `releases`, newest first, each with `version`, `date` and `summary`. A change of the first number means the profile or the job prompt must change too: say so to the user when you show the update
+`version.json` has `version`, the current version, `sha256`, the checksums of `README.md` and `vuln_feed.py` of that version, and `releases`, newest first, each with `version`, `date` and `summary`. A change of the first number means the profile or the job prompt must change too: say so to the user when you show the update
 
 vuln-digest is also a plugin for Claude Code, in the same repository. A plugin update changes only the files the plugin uses for setup. A job set up from the plugin runs from its own copies, like any other job, and follows the same rules
 
@@ -527,6 +546,7 @@ Do not fetch more than needed: one fetch of each source per run is enough. Use t
 | `fetch --all` | a preview of everything the sources hold now. The state is not read or changed |
 | `mark` | marks exactly the items from `last_run.json` as delivered |
 | `history --days 28` | the items delivered in the last N days, newest first: key, title, link, CVEs, last update |
+| `check-feeds --feeds FILE` | reads each feed once and reports its format, entries, newest date, entries with a CVE, and problems. Touches no state |
 | `--sources zerowire,kev,feeds,osv` | which sources to use |
 | `--feeds FILE` | vendor RSS or Atom feeds, one `name\|url` per line. Each entry is one item |
 | `--packages FILE` | the packages file for OSV |

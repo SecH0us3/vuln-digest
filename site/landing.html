@@ -65,13 +65,15 @@
           <p class="ad-sub">Claude, ChatGPT, Gemini, Codex, Cursor. Paste into a chat:</p>
           <pre id="prompt-text">Read https://vuln-digest.secmy.app/README.md and follow it: set up a scheduled vulnerability digest for me.</pre>
           <button type="button" class="copy" data-copy="prompt-text" aria-describedby="copy-status">Copy</button>
-          <p class="ad-foot" id="copy-status" aria-live="polite">Any agent that can open a link and run on a schedule</p>
+          <p class="ad-foot" id="copy-status">Any agent that can open a link and run on a schedule</p>
+          <p class="sr-only" id="copy-live" aria-live="polite"></p>
         </div>
         <div class="ad">
           <p class="ad-head">Claude Code plugin</p>
           <p class="ad-sub">The same instructions, installed locally. Run one at a time:</p>
           <div class="cmd"><code id="plugin-add">/plugin marketplace add SecH0us3/vuln-digest</code><button type="button" class="copy" data-copy="plugin-add">Copy</button></div>
           <div class="cmd"><code id="plugin-install">/plugin install vuln-digest@vuln-digest</code><button type="button" class="copy" data-copy="plugin-install">Copy</button></div>
+          <p class="ad-sub">Then ask Claude: <q>set up a vulnerability digest for me</q></p>
           <p class="ad-foot">One skill and the helper script. No hooks, no MCP servers</p>
         </div>
       </div>
@@ -180,8 +182,9 @@
         <li><a href="https://radar.cloudflare.com/zero-wire">Cloudflare Radar Zero Wire</a><span>briefings on the vulnerabilities that matter most, with updates</span></li>
         <li><a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog">CISA KEV</a><span>what is exploited in the wild</span></li>
         <li><a href="https://osv.dev/">OSV</a><span>advisories for your exact packages and versions</span></li>
+        <li>Vendor security feeds<span>the official bulletins of each product in your stack that has one</span></li>
         <li><a href="https://www.first.org/epss/">FIRST EPSS</a><span>how likely exploitation is in the next 30 days</span></li>
-        <li>Optional: <a href="https://github.com/advisories">GitHub Advisory Database</a>, <a href="https://nvd.nist.gov/">NVD</a>, vendor bulletins for your stack</li>
+        <li>Optional: <a href="https://github.com/advisories">GitHub Advisory Database</a>, <a href="https://nvd.nist.gov/">NVD</a></li>
       </ul>
     </div>
   </div>
@@ -266,6 +269,7 @@
           <p class="ad-sub">The same instructions, installed locally. Run one at a time:</p>
           <div class="cmd"><code id="plugin-add-2">/plugin marketplace add SecH0us3/vuln-digest</code><button type="button" class="copy" data-copy="plugin-add-2">Copy</button></div>
           <div class="cmd"><code id="plugin-install-2">/plugin install vuln-digest@vuln-digest</code><button type="button" class="copy" data-copy="plugin-install-2">Copy</button></div>
+          <p class="ad-sub">Then ask Claude: <q>set up a vulnerability digest for me</q></p>
           <p class="ad-foot">One skill and the helper script. No hooks, no MCP servers</p>
         </div>
       </div>
@@ -310,7 +314,11 @@
 document.querySelectorAll('button.copy').forEach(function (b) {
   b.addEventListener('click', function () {
     var text = document.getElementById(b.dataset.copy).textContent;
-    var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1800); };
+    var live = document.getElementById('copy-live');
+    var done = function () {
+      b.textContent = 'Copied'; live.textContent = 'Copied to the clipboard';
+      setTimeout(function () { b.textContent = 'Copy'; live.textContent = ''; }, 1800);
+    };
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text).then(done, function () { select(b.dataset.copy); });
     } else { select(b.dataset.copy); }
