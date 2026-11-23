@@ -1,11 +1,13 @@
 """Offline tests for vuln_feed.py. Run from the repository root: python3 -m unittest discover -s tools/tests"""
 import hashlib
+import http.server
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +25,83 @@ def dump(obj, path):
         json.dump(obj, f)
 
 
+def write(path, text):
+    with open(path, "w") as f:
+        f.write(text)
+
+
+class Server:
+    """A local HTTP server for feeds and the OSV API. pages: path -> bytes, or a callable(body) -> bytes"""
+
+    def __init__(self):
+        self.pages, self.log = {}, []
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def answer(self, body=None):
+                outer.log.append((self.command, self.path))
+                page = outer.pages.get(self.path)
+                if callable(page):
+                    page = page(body)
+                if page is None:
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(page if isinstance(page, bytes) else page.encode())
+
+            def do_GET(self):
+                self.answer()
+
+            def do_POST(self):
+                self.answer(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+NODE_RSS = ("<rss><channel><item><title>November 2026 security releases</title>"
+            "<link>https://nodejs.org/en/blog/vulnerability/november-2026-security-releases</link>"
+            "<pubDate>Wed, 11 Nov 2026 00:00:00 GMT</pubDate>"
+            "<description>Fixes CVE-2026-123864 and CVE-2026-123863</description></item></channel></rss>")
+DOTNET_ATOM = ('<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>ASP.NET Core security updates</title>'
+               '<link rel="self" href="https://example.org/feed/504"/>'
+               '<link href="https://github.com/dotnet/announcements/issues/504"/><id>tag:504</id>'
+               "<updated>2026-11-10T16:10:00Z</updated><content>CVE-2026-114146</content></entry></feed>")
+DEBIAN_RDF = ('<?xml version="1.0"?><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" '
+              'xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/">'
+              '<channel rdf:about="https://www.debian.org/security/"><title>DSA</title><items><rdf:Seq>'
+              '<rdf:li resource="https://www.debian.org/security/2026/dsa-6001"/></rdf:Seq></items></channel>'
+              '<item rdf:about="https://www.debian.org/security/2026/dsa-6001"><title>DSA-6001 nginx</title>'
+              '<link>https://www.debian.org/security/2026/dsa-6001</link>'
+              '<description>CVE-2026-123007</description><dc:date>2026-11-10</dc:date></item>'
+              '<item rdf:about="https://www.debian.org/security/2026/dsa-6002"><title>DSA-6002 php</title>'
+              '<link>https://www.debian.org/security/2026/dsa-6002</link>'
+              '<description>CVE-2026-109618</description><dc:date>2026-11-20</dc:date></item></rdf:RDF>')
+
+
+def osv_vuln(vid, aliases=(), modified="2026-11-12T00:00:00Z", affected=None):
+    return {"id": vid, "summary": f"{vid} summary", "aliases": list(aliases), "published": "2026-11-10T00:00:00Z",
+            "modified": modified, "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+            "affected": affected or []}
+
+
+def affected(eco, name, fixed):
+    return {"package": {"ecosystem": eco, "name": name},
+            "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": fixed}]}]}
+
+
+NO_PROXY_ENV = {k: v for k, v in os.environ.items() if "proxy" not in k.lower()}
+
+
 class VulnFeedTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
@@ -32,14 +111,24 @@ class VulnFeedTest(unittest.TestCase):
         shutil.copy(os.path.join(FIX, "kev.json"), self.kev)
         self.state = os.path.join(self.dir, "state.json")
         self.snap = os.path.join(self.dir, "last_run.json")
+        self.server = Server()
 
     def tearDown(self):
+        self.server.close()
         shutil.rmtree(self.dir)
+
+    def feeds_file(self, **feeds):
+        """Serve each feed and write a feeds file that lists them"""
+        path = os.path.join(self.dir, "feeds.txt")
+        for name, body in feeds.items():
+            self.server.pages[f"/{name}.xml"] = body
+        write(path, "".join(f"{n}|{self.server.url}/{n}.xml\n" for n in feeds))
+        return path
 
     def run_tool(self, *args, ok=True, today="2026-11-20"):
         cmd = [sys.executable, "-I", SCRIPT, *args, "--state", self.state, "--snapshot", self.snap,
                "--zerowire-file", self.zw, "--kev-file", self.kev, "--today", today]
-        p = subprocess.run(cmd, capture_output=True, text=True)
+        p = subprocess.run(cmd, capture_output=True, text=True, env=NO_PROXY_ENV)
         if ok:
             self.assertEqual(p.returncode, 0, p.stderr)
         return p
@@ -178,20 +267,9 @@ class VulnFeedTest(unittest.TestCase):
         self.assertTrue(partial[0]["partial"])
 
     def test_vendor_feeds_rss_and_atom(self):
-        rss = os.path.join(self.dir, "node.xml")
-        atom = os.path.join(self.dir, "dotnet.xml")
-        with open(rss, "w") as f:
-            f.write("<rss><channel><item><title>November 2026 security releases</title>"
-                    "<link>https://nodejs.org/en/blog/vulnerability/november-2026-security-releases</link>"
-                    "<pubDate>Wed, 11 Nov 2026 00:00:00 GMT</pubDate>"
-                    "<description>Fixes CVE-2026-123864 and CVE-2026-123863</description></item></channel></rss>")
-        with open(atom, "w") as f:
-            f.write('<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>ASP.NET Core security updates</title>'
-                    '<link href="https://github.com/dotnet/announcements/issues/504"/><id>tag:504</id>'
-                    "<updated>2026-11-10T16:10:00Z</updated><content>CVE-2026-114146</content></entry></feed>")
-        feeds = os.path.join(self.dir, "feeds.txt")
-        with open(feeds, "w") as f:
-            f.write(f"node|file://{rss}\ndotnet|file://{atom}\n# comment\nbroken|file:///nonexistent\n")
+        feeds = self.feeds_file(node=NODE_RSS, dotnet=DOTNET_ATOM)
+        with open(feeds, "a") as f:
+            f.write(f"# comment\nbroken|{self.server.url}/nonexistent.xml\n")
         out = self.fetch("--since", "2026-11-11", "--sources", "feeds", "--feeds", feeds)
         self.assertEqual(self.keys(out), {
             "feed:node:https://nodejs.org/en/blog/vulnerability/november-2026-security-releases": "new"})
@@ -217,6 +295,175 @@ class VulnFeedTest(unittest.TestCase):
         self.assertEqual(item["key"], "osv:GHSA-xxxx-yyyy-zzzz")
         self.assertEqual(item["fixed_versions"], ["16.4.1"])
         self.assertEqual(item["cves"], ["CVE-2026-126187"])
+
+
+    # ---------- new sources and the first run ----------
+
+    def test_new_feed_does_not_flood(self):
+        self.fetch("--since", "2026-01-01")
+        self.run_tool("mark")
+        # a month later the user adds a vendor feed: its archive is not news, today's entry is
+        feeds = self.feeds_file(debian=DEBIAN_RDF)
+        out = self.fetch("--sources", "zerowire,kev,feeds", "--feeds", feeds, today="2026-11-21")
+        self.assertEqual(self.keys(out), {"feed:debian:https://www.debian.org/security/2026/dsa-6002": "new"})
+        self.assertEqual(load(self.state)["sources"]["feeds:debian"], "2026-11-19")
+
+    def test_source_failed_on_first_run_gets_the_first_cut_off(self):
+        os.remove(self.kev)
+        self.fetch("--since", "2026-11-01")
+        self.run_tool("mark")
+        self.assertIsNone(load(self.state)["sources"]["kev"])
+        shutil.copy(os.path.join(FIX, "kev.json"), self.kev)
+        out = self.fetch(today="2026-11-21")
+        # dated 11-10: after the first run's --since, so it was due on the first run and comes now
+        self.assertEqual(self.keys(out), {"kev:CVE-2026-109618": "new"})
+        self.assertEqual(load(self.state)["sources"]["kev"], "2026-11-01")
+
+    def test_failed_feed_does_not_flood_later(self):
+        feeds = self.feeds_file(debian=DEBIAN_RDF)
+        del self.server.pages["/debian.xml"]
+        self.fetch("--since", "2026-11-20", "--sources", "feeds", "--feeds", feeds)
+        self.run_tool("mark")
+        self.server.pages["/debian.xml"] = DEBIAN_RDF
+        out = self.fetch("--sources", "feeds", "--feeds", feeds, today="2026-11-21")
+        self.assertEqual(set(self.keys(out)), {"feed:debian:https://www.debian.org/security/2026/dsa-6002"})
+
+    def test_undated_update_is_not_hidden_by_since(self):
+        feeds = self.feeds_file(odd="<rss><channel><item><title>No date</title><link>https://x.example/1</link>"
+                                    "<pubDate>sometime soon</pubDate></item></channel></rss>")
+        out = self.fetch("--since", "2026-11-20", "--sources", "feeds", "--feeds", feeds)
+        self.assertEqual(self.keys(out), {"feed:odd:https://x.example/1": "new"})
+        self.assertEqual(out["items"][0]["date"], "")
+
+    def test_v3_state_is_migrated(self):
+        self.fetch("--since", "2026-01-01")
+        self.run_tool("mark")
+        st = load(self.state)
+        del st["sources"], st["since"]
+        st["version"] = 3
+        dump(st, self.state)
+        self.assertEqual(self.fetch()["items"], [])
+        self.run_tool("mark")
+        self.assertEqual(load(self.state)["sources"]["zerowire"], "2026-11-20")
+        self.assertEqual(load(self.state)["version"], 4)
+
+    # ---------- vendor feeds ----------
+
+    def test_rss1_rdf_feed(self):
+        feeds = self.feeds_file(debian=DEBIAN_RDF)
+        out = self.fetch("--all", "--sources", "feeds", "--feeds", feeds)
+        got = {i["key"]: (i["date"], i["cves"]) for i in out["items"]}
+        self.assertEqual(got, {"feed:debian:https://www.debian.org/security/2026/dsa-6001": ("2026-11-10", ["CVE-2026-123007"]),
+                               "feed:debian:https://www.debian.org/security/2026/dsa-6002": ("2026-11-20", ["CVE-2026-109618"])})
+
+    def test_truncated_atom_feed_keeps_complete_entries(self):
+        two = DOTNET_ATOM.replace("</feed>", "<entry><title>cut off")
+        feeds = self.feeds_file(dotnet=two)
+        out = self.fetch("--all", "--sources", "feeds", "--feeds", feeds)
+        self.assertEqual([i["link"] for i in out["items"]], ["https://github.com/dotnet/announcements/issues/504"])
+        self.assertEqual([(e["source"], e.get("partial")) for e in out["errors"]], [("feeds:dotnet", True)])
+
+    def test_changed_advisory_is_an_update(self):
+        feeds = self.feeds_file(node=NODE_RSS)
+        self.fetch("--since", "2026-11-01", "--sources", "feeds", "--feeds", feeds)
+        self.run_tool("mark")
+        self.server.pages["/node.xml"] = NODE_RSS.replace("CVE-2026-123863", "CVE-2026-123863, CVE-2026-123999")
+        out = self.fetch("--sources", "feeds", "--feeds", feeds, today="2026-11-21")
+        self.assertEqual(list(self.keys(out).values()), ["updated"])
+        self.assertEqual([u["text"] for u in out["items"][0]["new_updates"]], ["advisory changed: adds CVE-2026-123999"])
+        self.run_tool("mark", today="2026-11-21")
+        self.assertEqual(self.fetch("--sources", "feeds", "--feeds", feeds, today="2026-11-22")["items"], [])
+
+    def test_hash_in_feed_url_is_not_a_comment(self):
+        feeds = self.feeds_file(node=NODE_RSS)
+        write(feeds, f"# feeds\nnode|{self.server.url}/node.xml#latest  # Node.js\n")
+        out = self.fetch("--all", "--sources", "feeds", "--feeds", feeds)
+        self.assertEqual(out["errors"], [])
+        self.assertEqual(len(out["items"]), 1)
+
+    # ---------- OSV ----------
+
+    def osv_server(self, vulns, batch):
+        """vulns: id -> advisory. batch: a list of results for each querybatch call, or one result list"""
+        calls = []
+
+        def querybatch(body):
+            calls.append(body)
+            res = batch(body) if callable(batch) else batch
+            return json.dumps({"results": res})
+        self.server.pages["/v1/querybatch"] = querybatch
+        for vid, v in vulns.items():
+            self.server.pages[f"/v1/vulns/{vid}"] = json.dumps(v)
+        return calls
+
+    def osv(self, packages, *args, **kw):
+        path = os.path.join(self.dir, "packages.txt")
+        write(path, packages)
+        return self.fetch("--sources", "osv", "--packages", path, "--osv-api", self.server.url + "/v1/", *args, **kw)
+
+    def test_osv_multi_package_advisory(self):
+        v = osv_vuln("CVE-2026-1000", affected=[affected("PyPI", "Django", "5.2.9"), affected("PyPI", "djangorestframework", "3.16.2"),
+                                                affected("Debian:12", "python-django", "3:4.2-1")])
+        self.osv_server({"CVE-2026-1000": v}, [{"vulns": [{"id": "CVE-2026-1000", "modified": v["modified"]}]},
+                                               {"vulns": [{"id": "CVE-2026-1000", "modified": v["modified"]}]}])
+        out = self.osv("PyPI|django|5.2.1\nPyPI|Django_REST_framework|3.16.0\n", "--all")
+        item = out["items"][0]
+        self.assertEqual([p["name"] for p in item["packages"]], ["django", "Django_REST_framework"])
+        self.assertEqual(item["fixed_versions"], ["5.2.9"])  # not the Debian package, not another one
+        self.assertEqual(item["cves"], ["CVE-2026-1000"])
+        self.assertTrue(item["cvss"][0].startswith("CVSS:3.1/"))
+
+    def test_osv_pages_cache_and_failed_advisory(self):
+        a = osv_vuln("GHSA-aaaa", ["CVE-2026-2000"], affected=[affected("npm", "next", "16.4.1")])
+        b = osv_vuln("GHSA-bbbb", affected=[affected("npm", "next", "16.4.2")])
+
+        def batch(body):
+            q = body["queries"][0]
+            if "page_token" not in q:
+                return [{"vulns": [{"id": "GHSA-aaaa", "modified": a["modified"]}], "next_page_token": "p2"}]
+            return [{"vulns": [{"id": "GHSA-bbbb", "modified": b["modified"]}, {"id": "GHSA-gone", "modified": "x"}]}]
+        self.osv_server({"GHSA-aaaa": a, "GHSA-bbbb": b}, batch)
+        out = self.osv("npm|next|\n", "--since", "2026-11-01")
+        self.assertEqual(set(self.keys(out)), {"osv:GHSA-aaaa", "osv:GHSA-bbbb"})
+        self.assertEqual([(e["source"], e.get("partial")) for e in out["errors"]], [("osv", True)])
+        self.run_tool("mark")
+        self.server.log.clear()
+        self.assertEqual(self.osv("npm|next|\n", today="2026-11-21")["items"], [])
+        gets = [p for m, p in self.server.log if m == "GET"]
+        self.assertEqual(gets, ["/v1/vulns/GHSA-gone"])  # the delivered, unchanged advisories are not fetched
+
+    def test_cached_osv_item_comes_back_with_kev_status(self):
+        a = osv_vuln("GHSA-aaaa", ["CVE-2026-2000"], affected=[affected("npm", "next", "16.4.1")])
+        self.osv_server({"GHSA-aaaa": a}, [{"vulns": [{"id": "GHSA-aaaa", "modified": a["modified"]}]}])
+        self.osv("npm|next|16.2.0\n", "--since", "2026-11-01")
+        self.run_tool("mark")
+        kev = load(self.kev)
+        kev["vulnerabilities"].append({"cveID": "CVE-2026-2000", "vendorProject": "Vercel", "product": "Next.js",
+                                       "vulnerabilityName": "Next.js RCE", "dateAdded": "2026-11-20", "dueDate": "",
+                                       "shortDescription": "", "requiredAction": "", "knownRansomwareCampaignUse": "Known"})
+        dump(kev, self.kev)
+        path = os.path.join(self.dir, "packages.txt")
+        out = self.fetch("--sources", "kev,osv", "--packages", path, "--osv-api", self.server.url + "/v1/", today="2026-11-21")
+        self.assertEqual(self.keys(out), {"osv:GHSA-aaaa": "updated"})
+        item = out["items"][0]
+        self.assertEqual(item["fixed_versions"], ["16.4.1"])
+        self.assertEqual(item["kev_cves"]["CVE-2026-2000"]["ransomware"], "Known")
+
+    # ---------- the same CVE from several sources ----------
+
+    def test_same_cve_from_several_sources(self):
+        self.fetch("--since", "2026-11-19")  # nginx2root, with CVE-2026-123007, is delivered
+        self.run_tool("mark")
+        feeds = self.feeds_file(debian=DEBIAN_RDF)
+        v = osv_vuln("DEBIAN-CVE-2026-109618", ["CVE-2026-109618"], affected=[affected("Debian", "php8.2", "8.2.36")])
+        self.osv_server({v["id"]: v}, [{"vulns": [{"id": v["id"], "modified": v["modified"]}]}])
+        out = self.osv("Debian|php8.2|8.2.20\n", "--sources", "feeds,osv", "--feeds", feeds, "--since", "2026-11-01",
+                       today="2026-11-21")
+        items = {i["key"]: i for i in out["items"]}
+        dsa1 = items["feed:debian:https://www.debian.org/security/2026/dsa-6001"]
+        self.assertEqual(dsa1["cves_delivered_in"], {"CVE-2026-123007": "zerowire:nginx2root"})
+        self.assertEqual(items["osv:DEBIAN-CVE-2026-109618"]["same_cve_items"],
+                         ["feed:debian:https://www.debian.org/security/2026/dsa-6002"])
 
 
 if __name__ == "__main__":

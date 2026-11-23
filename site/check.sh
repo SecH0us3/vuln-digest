@@ -46,9 +46,9 @@ for id in $(grep -oE 'href="#[^"]+"' "$LANDING" | sed -E 's/href="#//; s/"$//' |
   grep -qE "id=\"$id\"" "$LANDING" || fail "anchor without target: #$id"
 done
 
-# The helper script size claim on the landing page stays true (about 500 lines)
+# The helper script size claim on the landing page stays true (about 700 lines)
 lines="$(wc -l < tools/vuln_feed.py)"
-[ "$lines" -ge 420 ] && [ "$lines" -le 620 ] || fail "vuln_feed.py has $lines lines: update the landing page text"
+[ "$lines" -ge 620 ] && [ "$lines" -le 800 ] || fail "vuln_feed.py has $lines lines: update the landing page text"
 
 # --- The instructions page ---
 grep -qF 'href="https://github.com/SecH0us3/vuln-digest"' "$DOCS" || fail 'no repository link on the instructions page'
