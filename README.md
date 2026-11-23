@@ -2,7 +2,7 @@
 
 This file is a task for an AI assistant: Claude, ChatGPT, Gemini, Codex, Cursor or any other. The user gives the assistant this file and asks it to set up a vulnerability digest. The address of this file is https://vuln-digest.secmy.app/README.md
 
-Version: 1.4.1. The current version and what changed are at https://vuln-digest.secmy.app/version.json
+Version: 1.5.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
 
 If you are a person, the overview is at https://vuln-digest.secmy.app/ - give the address of this file to your AI assistant and it does the rest
 
@@ -113,7 +113,7 @@ The table lists every question, why it matters and its default. Ask in the user'
 | 8 | **Do you want an urgent alert?** A separate message outside the schedule when an item in focus is exploited in the wild or has a public exploit | The most important case should not wait for the next morning | yes, if the platform can run often enough (step 4) |
 | 9 | **Where should the digest go?** This chat, email, Slack, Telegram, Microsoft Teams, a file in a folder or repository, a GitHub issue | Step 5 | this chat, or wherever this platform delivers the result of a scheduled job |
 | 10 | **Language and length?** Short (a table and one line per item) or detailed (a section per item in focus) | The format | the language of this conversation, detailed for items in focus, one line for the rest |
-| 11 | **Which sources?** See the "Sources" section. Offer the defaults and name the optional ones that fit the stack | More sources find more, but cost more time and tokens per run | Cloudflare Radar Zero Wire and the CISA KEV catalog, plus the official security feed of each product in focus that has one, plus OSV if the user gave a repository or an SBOM in question 2. Tell the user that an OSV query sends package names and versions to osv.dev |
+| 11 | **Which sources?** See the "Sources" section. Offer the defaults and name the optional ones that fit the stack | More sources find more, but cost more time and tokens per run | Cloudflare Radar Zero Wire, CISA KEV, FIRST EPSS, CVE.org details, plus the official security feed (`feeds`) or GitHub Security Advisories (`ghsa`) of each product in focus that has one, plus OSV if the user gave a repository or an SBOM in question 2. Offer NVD (`nvd`) only for products in focus with neither a vendor feed nor a GitHub repository (such as network or VPN appliances), and note its rate limits without `NVD_API_KEY`. Tell the user what each query sends out (package names to osv.dev, repo names to GitHub, CPEs to NVD, CVE ids to EPSS and CVE.org) |
 | 12 | **How far back should the first digest look?** | The first run has no state | 7 days |
 | 13 | **What is exposed to the internet?** Which of the products from question 1 are reachable from outside | The same vulnerability is urgent on an internet-facing proxy and can wait on a laptop | not known: treat servers and network equipment as exposed |
 
@@ -164,6 +164,8 @@ stack:                       # what the user runs. Names as the user says them, 
   - { name: Java, aliases: [OpenJDK, JVM, Spring Boot] }
 packages_file: packages.txt  # for OSV, optional
 feeds_file: feeds.txt        # vendor security feeds of the products in focus, see R2
+ghsa_file: ghsa.txt          # GitHub repos or ecosystems for GHSA, optional
+nvd_file: nvd.txt            # CPE prefixes for NVD (appliances without a feed), optional
 stack_sources:               # where step 0 read the stack, for the rescan. Names, not secrets
   - { kind: github, repos: [acme/web-shop, acme/infra] }
   - { kind: confluence, pages: ["Infrastructure overview"] }
@@ -174,7 +176,7 @@ ignore:                      # never show
   - DoS without code execution
 outside_stack: high          # all | high (high and critical, or exploited) | exploited_only | none
 
-sources: [zerowire, kev, feeds]  # see "Sources". Add osv if there is a packages file
+sources: [zerowire, kev, feeds]  # see "Sources". Add osv, ghsa or nvd when those files are set
 
 boost: []                    # filled from feedback: topics the user wants more of
 less: []                     # filled from feedback: topics the user wants less of
@@ -298,12 +300,15 @@ Then look at `patched` for entries with `why: snoozed` whose `until` date is aft
 With the helper script (see "Helper script"):
 
 ```sh
-python3 -I vuln_feed.py fetch --sources zerowire,kev --epss
-# with vendor feeds and a packages file:
-python3 -I vuln_feed.py fetch --sources zerowire,kev,feeds,osv --feeds feeds.txt --packages packages.txt --epss
+python3 -I vuln_feed.py fetch --sources zerowire,kev --epss --cve-details
+# with vendor feeds, packages, GHSA and NVD:
+python3 -I vuln_feed.py fetch --sources zerowire,kev,feeds,osv,ghsa,nvd \
+  --feeds feeds.txt --packages packages.txt --ghsa ghsa.txt --nvd nvd.txt --epss --cve-details
 ```
 
-Zero Wire and KEV cover only a few of the most important vulnerabilities each week. A product in focus that ships regular security releases (a runtime, a framework, a web server) needs its own feed, or its releases never reach the digest. At setup, find the official security feed (RSS or Atom) of each product in focus, check it in the vendor's documentation, and list it in `feeds.txt` as `name|url`. Then run `vuln_feed.py check-feeds --feeds feeds.txt`: it reads each feed once and shows its format, entries, newest date and whether the entries name CVE ids. Drop or replace a feed it reports a problem with: an HTML page instead of a feed, no entries, or a blog whose entries name no CVE. If a product has no feed, read its security page on each run by hand and give its entries keys of the form `page:<name>:<url>`
+Zero Wire and KEV cover only a few of the most important vulnerabilities each week. A product in focus that ships regular security releases (a runtime, a framework, a web server) needs its own feed, or its releases never reach the digest. At setup, find the official security feed (RSS or Atom) of each product in focus, check it in the vendor's documentation, and list it in `feeds.txt` as `name|url`. Then run `vuln_feed.py check-feeds --feeds feeds.txt`: it reads each feed once and shows its format, entries, newest date and whether the entries name CVE ids. Drop or replace a feed it reports a problem with: an HTML page instead of a feed, no entries, or a blog whose entries name no CVE
+
+For open-source products in focus that publish GitHub Security Advisories instead of an RSS feed (such as Kubernetes, Grafana, Traefik or Envoy), list their repositories in `ghsa.txt` as `owner/repo` and turn on `ghsa`. A line `package|<ecosystem>|<name>`, such as `package|npm|next`, reads the reviewed advisories that affect that one package. OSV already includes those, so use it only without a packages file. For network, VPN or proprietary products with neither a vendor feed nor a GitHub repository (such as FortiGate, PAN-OS or ESXi), list verified CPE prefixes in `nvd.txt` as `name|cpe:2.3:...` and turn on `nvd`. Optional `GITHUB_TOKEN` and `NVD_API_KEY` environment variables raise the API limits - keep them in the platform's secret storage, never in files or command-line flags (rule 8). If a product still has no feed or API, read its security page on each run by hand and give its entries keys of the form `page:<name>:<url>`
 
 The output is JSON: `items` (only new and updated items, each with `status` new or updated and `new_updates`), `errors` (sources that failed, and `"partial": true` for a source that was read only in part, for example a feed cut off in transfer) and `last_digest`. The script saves the same items into `last_run.json`
 
@@ -338,6 +343,8 @@ KEV entries have `ransomware`: `Known` means the CVE is used in ransomware campa
 
 EPSS is a probability of exploitation in the next 30 days. Show it as a percent next to the CVE when it is known, and use a high EPSS to move an item up one level, never down
 
+`cve_details` (from `--cve-details`) adds CVSS scores and affected version ranges from CVE.org for items that lacked them, such as KEV entries and short vendor bulletins. GHSA and NVD items include `cvss_score` and `severity` directly
+
 ### R5. Find what to do
 
 For each item in focus give one concrete action, from the source: the fixed versions, the workaround, the setting to change, the WAF rule. If the source has no fix yet, say so and give the mitigation it suggests. Add a command that checks whether the user is affected when there is a simple one (`nginx -v`, `java -version`, `npm ls <package>`)
@@ -371,7 +378,7 @@ python3 -I vuln_feed.py fetch --sources zerowire,kev,feeds,osv --feeds feeds.txt
   --state alerts-state.json --snapshot alerts-last_run.json
 ```
 
-Use the same `--sources`, `--feeds` and `--packages` as the daily run in R2, or the alert job misses what only a vendor feed or OSV reports. Leave out `--epss`: an alert does not need it
+Use the same `--sources`, `--feeds`, `--packages`, `--ghsa` and `--nvd` options as the daily run in R2, or the alert job misses what only a vendor feed, OSV, GHSA or NVD reports. Leave out `--epss` and `--cve-details`: an alert does not need them
 
 Keep only urgent items. If there are any, send a short alert (see "Digest format"). Then run `mark` with the same two options, also when nothing was urgent, so the alert job does not look at the same items again. Stay silent if nothing is urgent. On its first run, use `--since` with today's date
 
@@ -524,16 +531,17 @@ vuln-digest is also a plugin for Claude Code, in the same repository. A plugin u
 
 ## Sources
 
-The sources marked "on" are used unless the user says otherwise. The others are a starting point: check the URL and the terms of use in the official documentation before you turn a source on. A source that takes a query (OSV, NVD, EPSS) learns what you ask about: package names and CVE ids, nothing else
+The sources marked "on" are used unless the user says otherwise. The others are a starting point: check the URL and the terms of use in the official documentation before you turn a source on. A source that takes a query (OSV, GHSA, NVD, EPSS, CVE.org) learns what you ask about: package names, repository names, CPE prefixes or CVE ids, nothing else
 
 | Source | What it gives | Access | Default |
 |---|---|---|---|
 | [Cloudflare Radar Zero Wire](https://radar.cloudflare.com/zero-wire) | a few briefings per week on the most important vulnerabilities, with updates when the situation changes. RSS: `https://radar.cloudflare.com/zero-wire/feed` | public, no key | on |
 | [CISA Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) | vulnerabilities that are exploited in the wild. It is also used to mark items of other sources as exploited | public JSON, no key | on |
 | [OSV](https://osv.dev/) | advisories for exact packages and versions, from many ecosystems | public API, no key | on if the user gave packages |
-| [GitHub Advisory Database](https://github.com/advisories) | reviewed advisories for packages | API, a token raises the limits | optional |
+| [GitHub Advisory Database](https://github.com/advisories) | repository security advisories (`owner/repo`) and reviewed advisories of one package (`ghsa` source) | public API, optional `GITHUB_TOKEN` env var raises limits | on for open-source products in focus that publish repo advisories instead of RSS |
 | [FIRST EPSS](https://www.first.org/epss/) | the probability that a CVE is exploited in the next 30 days | public API, no key | on, as enrichment |
-| [NVD](https://nvd.nist.gov/) | CVE details and CVSS scores | public API, a key raises the limits | optional, for details only |
+| [CVE.org](https://www.cve.org/) | CVE JSON 5.0 records: CVSS scores and affected version ranges (`--cve-details`, `cveawg.mitre.org`) | public API, no key | on, as enrichment for items missing CVSS or affected versions |
+| [NVD](https://nvd.nist.gov/) | CVE 2.0 advisories by CPE prefix and CVSS scores (`nvd` source) | public API, optional `NVD_API_KEY` env var raises limits (5 req/30s without a key) | optional, for products with no vendor feed or GHSA |
 | vendor advisories | security bulletins of the products in focus (runtimes, frameworks, web servers, operating systems, browsers, network equipment, cloud providers) | usually RSS or Atom (the `feeds` source), sometimes only a web page | on for each product in focus that has one |
 
 Do not fetch more than needed: one fetch of each source per run is enough. Use the source's own API limits, and send a User-Agent that names this tool
@@ -550,17 +558,21 @@ Do not fetch more than needed: one fetch of each source per run is enough. Use t
 | `mark` | marks exactly the items from `last_run.json` as delivered |
 | `history --days 28` | the items delivered in the last N days, newest first: key, title, link, CVEs, last update |
 | `check-feeds --feeds FILE` | reads each feed once and reports its format, entries, newest date, entries with a CVE, and problems. Touches no state |
-| `--sources zerowire,kev,feeds,osv` | which sources to use |
+| `--sources zerowire,kev,feeds,osv,ghsa,nvd` | which sources to use |
 | `--feeds FILE` | vendor RSS or Atom feeds, one `name\|url` per line. Each entry is one item |
 | `--packages FILE` | the packages file for OSV |
+| `--ghsa FILE` | GitHub repositories (`owner/repo`) and packages (`package\|ecosystem\|name`) for GHSA. Reads optional `GITHUB_TOKEN` from the environment and sends it only over https |
+| `--nvd FILE` | products to watch in NVD, one `name\|cpe:2.3:...` per line. Reads optional `NVD_API_KEY` from the environment and pauses between requests to respect NVD limits |
+| `--nvd-days 30` | NVD publication window in days (1 to 119, default 30). Old CVEs that NVD modifies again are not news and are not read |
 | `--epss` | adds EPSS scores |
+| `--cve-details` | adds CVSS scores and affected version ranges from CVE.org for items that lack them (capped by `--cve-details-max`, default 30) |
 | `--kev-max-age 30` | KEV entries older than N days are not news (the catalog has more than a thousand). They still mark items of other sources as exploited |
 | `--state PATH`, `--snapshot PATH` | where the files are. By default next to the script |
 
-How it avoids repeats: each item has a list of fingerprints of its updates. An item is shown when its key is new or when it has an update that was not delivered. A changed guid or "last reviewed" date alone is not an update. When a CVE of an item that was already delivered enters the KEV catalog, the item comes back with the update "added to CISA KEV". A KEV entry whose CVE is part of another item is shown inside that item, not twice. A vendor feed entry whose title or CVE list changes comes back with the update "advisory changed"
+How it avoids repeats: each item has a list of fingerprints of its updates. An item is shown when its key is new or when it has an update that was not delivered. A changed guid or "last reviewed" date alone is not an update. When a CVE of an item that was already delivered enters the KEV catalog, the item comes back with the update "added to CISA KEV". A KEV entry whose CVE is part of another item is shown inside that item, not twice. A vendor feed, GHSA or NVD entry whose title, severity or CVE list changes comes back with the update "advisory changed"
 
-New sources: the state remembers which sources were read in full. A source read for the first time, such as a feed the user added later or a source that failed on the first run, does not bring its whole archive: its updates dated before the day before the last digest count as seen. A source that failed on the first run gets that run's `--since` date instead. An update without a date is shown once, never counted as seen
+New sources: the state remembers which sources were read in full. A source read for the first time, such as a feed, GHSA repository or NVD product the user added later, or a source that failed on the first run, does not bring its whole archive: its updates dated before the day before the last digest count as seen. A source that failed on the first run gets that run's `--since` date instead. An update without a date is shown once, never counted as seen
 
-Feeds can be RSS 2.0, RSS 1.0 (RDF) or Atom. OSV results list every package from the packages file that an advisory affects (`packages`), the fixed versions of those packages only, and CVSS vectors (`cvss`). An advisory that did not change since it was delivered is not downloaded again
+Feeds can be RSS 2.0, RSS 1.0 (RDF) or Atom. OSV results list every package from the packages file that an advisory affects (`packages`), the fixed versions of those packages only, and CVSS vectors (`cvss`). An advisory that did not change since it was delivered is not downloaded again. GHSA reads published repository security advisories and the reviewed advisories of single packages. NVD reads the CVEs published for each CPE in the window and skips rejected CVEs. A cut-off NVD answer is reported as partial and its product stays pending
 
 If a source fails, the script reports it in `errors` and goes on with the others. A response larger than 32 MB is refused

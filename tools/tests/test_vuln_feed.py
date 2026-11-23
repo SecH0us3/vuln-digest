@@ -39,18 +39,23 @@ class QuickServer(http.server.ThreadingHTTPServer):
 
 
 class Server:
-    """A local HTTP server for feeds and the OSV API. pages: path -> bytes, or a callable(body) -> bytes"""
+    """A local HTTP server for feeds and APIs. pages: path -> bytes, or callable"""
 
     def __init__(self):
-        self.pages, self.log = {}, []
+        self.pages, self.log, self.headers = {}, [], []
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def answer(self, body=None):
                 outer.log.append((self.command, self.path))
+                hdrs = {k.lower(): v for k, v in self.headers.items()}
+                outer.headers.append(hdrs)
+                base, _, query = self.path.partition("?")
                 page = outer.pages.get(self.path)
+                if page is None:
+                    page = outer.pages.get(base)
                 if callable(page):
-                    page = page(body)
+                    page = page(body) if self.command == "POST" else page(query, hdrs)
                 if page is None:
                     self.send_error(404)
                     return
@@ -122,6 +127,7 @@ class VulnFeedTest(unittest.TestCase):
     def setUp(self):
         self.server.pages.clear()
         self.server.log.clear()
+        self.server.headers.clear()
         self.dir = tempfile.mkdtemp()
         self.zw = os.path.join(self.dir, "zw.xml")
         self.kev = os.path.join(self.dir, "kev.json")
@@ -141,10 +147,11 @@ class VulnFeedTest(unittest.TestCase):
         write(path, "".join(f"{n}|{self.server.url}/{n}.xml\n" for n in feeds))
         return path
 
-    def run_tool(self, *args, ok=True, today="2026-11-20"):
+    def run_tool(self, *args, ok=True, today="2026-11-20", env=None):
         cmd = [sys.executable, "-I", SCRIPT, *args, "--state", self.state, "--snapshot", self.snap,
                "--zerowire-file", self.zw, "--kev-file", self.kev, "--today", today]
-        p = subprocess.run(cmd, capture_output=True, text=True, env=NO_PROXY_ENV)
+        run_env = {**NO_PROXY_ENV, **(env or {})}
+        p = subprocess.run(cmd, capture_output=True, text=True, env=run_env)
         if ok:
             self.assertEqual(p.returncode, 0, p.stderr)
         return p
@@ -548,6 +555,225 @@ class VulnFeedTest(unittest.TestCase):
         self.assertEqual(dsa1["cves_delivered_in"], {"CVE-2026-123007": "zerowire:nginx2root"})
         self.assertEqual(items["osv:DEBIAN-CVE-2026-109618"]["same_cve_items"],
                          ["feed:debian:https://www.debian.org/security/2026/dsa-6002"])
+
+    # ---------- GHSA ----------
+
+    def test_ghsa_repo_and_ecosystem_advisories(self):
+        repo_advs = [{
+            "ghsa_id": "GHSA-repo-1111-2222",
+            "cve_id": "CVE-2026-109618",
+            "html_url": "https://github.com/acme/proxy/security/advisories/GHSA-repo-1111-2222",
+            "summary": "Request smuggling in proxy",
+            "description": "Allows bypassing path rules",
+            "severity": "critical",
+            "published_at": "2026-11-19T12:00:00Z",
+            "updated_at": "2026-11-20T08:00:00Z",
+            "cvss_severities": {
+                "cvss_v3": {"vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "score": 9.8},
+                "cvss_v4": {"vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N", "score": 9.3},
+            },
+            "vulnerabilities": [{
+                "package": {"ecosystem": "go", "name": "github.com/acme/proxy"},
+                "vulnerable_version_range": "< 1.31.2",
+                "first_patched_version": {"identifier": "1.31.2"},
+            }],
+        }]
+        eco_advs = [{
+            "ghsa_id": "GHSA-eco-3333-4444",
+            "cve_id": None,
+            "identifiers": [{"type": "GHSA", "value": "GHSA-eco-3333-4444"}, {"type": "CVE", "value": "CVE-2026-5555"}],
+            "html_url": "https://github.com/advisories/GHSA-eco-3333-4444",
+            "summary": "Prototype pollution in widget",
+            "description": "Details here",
+            "severity": "high",
+            "published_at": "2026-11-18T10:00:00Z",
+            "updated_at": "2026-11-18T10:00:00Z",
+            "cvss": {"vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N", "score": 7.5},
+            "vulnerabilities": [{
+                "package": {"ecosystem": "npm", "name": "widget"},
+                "vulnerable_version_range": "<= 2.0.0",
+                "first_patched_version": "2.0.1",
+            }],
+        }]
+        seen_auth = []
+
+        def serve_repo(query, hdrs):
+            seen_auth.append(hdrs.get("authorization"))
+            return json.dumps(repo_advs)
+
+        def serve_eco(query, hdrs):
+            self.assertIn("ecosystem=npm", query)
+            self.assertIn("affects=widget", query)  # one package, not the whole ecosystem
+            return json.dumps(eco_advs)
+
+        self.server.pages["/repos/acme/proxy/security-advisories"] = serve_repo
+        self.server.pages["/advisories"] = serve_eco
+        ghsa_file = os.path.join(self.dir, "ghsa.txt")
+        write(ghsa_file, "# repos and packages\nacme/proxy\npackage|npm|widget\nacme/missing\n")
+        out = self.fetch("--all", "--sources", "kev,ghsa", "--ghsa", ghsa_file,
+                         "--ghsa-api", self.server.url + "/", env={"GITHUB_TOKEN": "example"})
+        self.assertEqual(seen_auth, ["Bearer example"])
+        self.assertEqual([e["source"] for e in out["errors"]], ["ghsa:acme/missing"])
+        items = {i["key"]: i for i in out["items"]}
+        r_item = items["ghsa:GHSA-repo-1111-2222"]
+        self.assertEqual(r_item["fixed_versions"], ["1.31.2"])
+        self.assertEqual(r_item["cves"], ["CVE-2026-109618"])
+        self.assertEqual(r_item["cvss_score"], 9.8)
+        self.assertIn("CVE-2026-109618", r_item["kev_cves"])
+        e_item = items["ghsa:GHSA-eco-3333-4444"]
+        self.assertEqual(e_item["fixed_versions"], ["2.0.1"])
+        self.assertEqual(e_item["cves"], ["CVE-2026-5555"])
+        self.assertEqual(e_item["cvss_score"], 7.5)
+
+    def test_ghsa_new_repo_does_not_flood_and_tracks_updates(self):
+        self.fetch("--since", "2026-01-01")
+        self.run_tool("mark")
+        advs = [
+            {"ghsa_id": "GHSA-old-0001", "cve_id": "CVE-2025-0001", "summary": "Old bug",
+             "severity": "high", "published_at": "2026-10-01T00:00:00Z", "updated_at": "2026-10-01T00:00:00Z",
+             "vulnerabilities": []},
+            {"ghsa_id": "GHSA-new-0002", "cve_id": None, "summary": "Fresh bug",
+             "severity": "high", "published_at": "2026-11-20T00:00:00Z", "updated_at": "2026-11-20T00:00:00Z",
+             "vulnerabilities": []},
+        ]
+        self.server.pages["/repos/acme/app/security-advisories"] = lambda q, h: json.dumps(advs)
+        ghsa_file = os.path.join(self.dir, "ghsa.txt")
+        write(ghsa_file, "acme/app\n")
+        out = self.fetch("--sources", "zerowire,kev,ghsa", "--ghsa", ghsa_file,
+                         "--ghsa-api", self.server.url + "/", today="2026-11-21")
+        self.assertEqual(self.keys(out), {"ghsa:GHSA-new-0002": "new"})
+        self.assertNotIn("ghsa", load(self.state)["sources"])
+        self.assertEqual(load(self.state)["sources"]["ghsa:acme/app"], "2026-11-19")
+        self.run_tool("mark", today="2026-11-21")
+        # later a patch and CVE are added to GHSA-new-0002
+        advs[1]["cve_id"] = "CVE-2026-9999"
+        advs[1]["updated_at"] = "2026-11-22T09:00:00Z"
+        advs[1]["vulnerabilities"] = [{"package": {"ecosystem": "go", "name": "acme/app"},
+                                       "first_patched_version": {"identifier": "2.1.0"}}]
+        out2 = self.fetch("--sources", "zerowire,kev,ghsa", "--ghsa", ghsa_file,
+                          "--ghsa-api", self.server.url + "/", today="2026-11-22")
+        self.assertEqual(self.keys(out2), {"ghsa:GHSA-new-0002": "updated"})
+        texts = [u["text"] for u in out2["items"][0]["new_updates"]]
+        self.assertTrue(any("fixed in 2.1.0" in t for t in texts))
+
+    # ---------- NVD ----------
+
+    def test_nvd_cpe_watch_api_key_and_baseline(self):
+        nvd_payload = {
+            "totalResults": 3,
+            "vulnerabilities": [
+                {"cve": {
+                    "id": "CVE-2026-7001", "published": "2026-11-18T10:00:00.000",
+                    "lastModified": "2026-11-19T12:00:00.000", "vulnStatus": "Analyzed",
+                    "descriptions": [{"lang": "es", "value": "No"}, {"lang": "en", "value": "Auth bypass in FortiOS"}],
+                    "metrics": {"cvssMetricV31": [{"cvssData": {
+                        "baseScore": 9.8, "baseSeverity": "CRITICAL",
+                        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]},
+                }},
+                {"cve": {
+                    "id": "CVE-2026-7002", "published": "2026-10-01T10:00:00.000",
+                    "lastModified": "2026-10-01T10:00:00.000", "vulnStatus": "Analyzed",
+                    "descriptions": [{"lang": "en", "value": "Older bug"}],
+                    "metrics": {},
+                }},
+                {"cve": {
+                    "id": "CVE-2026-7003", "published": "2026-11-19T10:00:00.000",
+                    "lastModified": "2026-11-19T10:00:00.000", "vulnStatus": "Rejected",
+                    "descriptions": [{"lang": "en", "value": "Rejected reason"}],
+                    "metrics": {},
+                }},
+            ],
+        }
+        seen_queries, seen_keys = [], []
+
+        def serve_nvd(query, hdrs):
+            seen_queries.append(query)
+            seen_keys.append(hdrs.get("apikey"))
+            if "broken" in query:
+                return None
+            return json.dumps(nvd_payload)
+
+        self.server.pages["/cves"] = serve_nvd
+        nvd_file = os.path.join(self.dir, "nvd.txt")
+        write(nvd_file, "fortios|cpe:2.3:o:fortinet:fortios\nbroken|cpe:2.3:a:bad:broken\n")
+        out = self.fetch("--since", "2026-11-15", "--sources", "nvd", "--nvd", nvd_file,
+                         "--nvd-api", self.server.url + "/cves", "--nvd-delay", "0",
+                         env={"NVD_API_KEY": "example"})
+        self.assertEqual(seen_keys, ["example", "example"])
+        # by publication date: old CVEs that NVD modifies again are not news
+        self.assertTrue(all("pubStartDate=" in q and "pubEndDate=" in q and "lastMod" not in q for q in seen_queries))
+        self.assertEqual([e["source"] for e in out["errors"]], ["nvd:broken"])
+        self.assertEqual(self.keys(out), {"nvd:CVE-2026-7001": "new"})
+        item = out["items"][0]
+        self.assertEqual(item["cvss_score"], 9.8)
+        self.assertEqual(item["severity"], "CRITICAL")
+        self.assertEqual(item["summary"], "Auth bypass in FortiOS")
+        self.assertNotIn("nvd", load(self.state)["sources"])
+        self.assertEqual(load(self.state)["sources"]["nvd:fortios"], "2026-11-15")
+        # window > 120 days is clamped to 119 days, and truncated responses flag partial=True
+        nvd_payload["totalResults"] = 9999
+        seen_queries.clear()
+        out2 = self.fetch("--all", "--sources", "nvd", "--nvd", nvd_file, "--nvd-days", "200",
+                          "--nvd-api", self.server.url + "/cves", "--nvd-delay", "0")
+        self.assertIn("pubStartDate=2026-07-24T00%3A00%3A00.000Z", seen_queries[0])
+        self.assertTrue(any(e["source"] == "nvd:fortios" and e.get("partial") for e in out2["errors"]))
+        # a cut-off answer does not count as read in full
+        write(nvd_file, "fortios|cpe:2.3:o:fortinet:fortios\npanos|cpe:2.3:o:paloaltonetworks:pan-os\n")
+        self.fetch("--sources", "nvd", "--nvd", nvd_file, "--nvd-api", self.server.url + "/cves", "--nvd-delay", "0",
+                   today="2026-11-21")
+        self.assertNotIn("nvd:panos", load(self.state)["sources"])  # read next time with the first cut-off
+
+    def test_nvd_old_cve_modified_again_is_not_news(self):
+        payload = {"totalResults": 0, "vulnerabilities": []}
+        self.server.pages["/cves"] = lambda q, h: json.dumps(payload)
+        nvd = os.path.join(self.dir, "nvd.txt")
+        write(nvd, "fortios|cpe:2.3:o:fortinet:fortios\n")
+        args = ("--sources", "nvd", "--nvd", nvd, "--nvd-api", self.server.url + "/cves", "--nvd-delay", "0")
+        self.fetch("--since", "2026-11-13", *args)
+        self.run_tool("mark")
+        payload.update(totalResults=1, vulnerabilities=[{"cve": {
+            "id": "CVE-2019-0001", "published": "2019-05-01T00:00:00.000", "lastModified": "2026-11-20T00:00:00.000",
+            "vulnStatus": "Modified", "descriptions": [], "metrics": {}}}])
+        self.assertEqual(self.fetch(*args, today="2026-11-21")["items"], [])
+
+    # ---------- CVE.org enrichment ----------
+
+    def test_cve_details_enrichment(self):
+        cve_record = {
+            "cveMetadata": {"cveId": "CVE-2026-109618", "state": "PUBLISHED"},
+            "containers": {
+                "cna": {
+                    "affected": [{
+                        "vendor": "PHP Group", "product": "PHP", "defaultStatus": "affected",
+                        "versions": [{"version": "8.4.0", "lessThan": "8.4.28", "status": "affected"},
+                                     {"version": "8.5.13", "status": "unaffected"}],
+                    }],
+                },
+                "adp": [{
+                    "metrics": [{"cvssV3_1": {
+                        "baseScore": 9.2, "baseSeverity": "CRITICAL",
+                        "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:L",
+                    }}],
+                }],
+            },
+        }
+        self.server.pages["/cve/CVE-2026-109618"] = json.dumps(cve_record)
+        out = self.fetch("--since", "2026-11-01", "--sources", "zerowire,kev",
+                         "--cve-details", "--cve-api", self.server.url + "/cve/")
+        items = {i["key"]: i for i in out["items"]}
+        kev_item = items["kev:CVE-2026-109618"]
+        det = kev_item["cve_details"]["CVE-2026-109618"]
+        self.assertEqual(det["score"], 9.2)
+        self.assertEqual(det["severity"], "CRITICAL")
+        self.assertIn("PHP Group / PHP: 8.4.0 < 8.4.28, fixed >= 8.5.13", det["affected"])
+        # CVEs without a record in mock server produce partial cve_org errors without breaking items
+        self.assertTrue(any(e["source"] == "cve_org" and e.get("partial") for e in out["errors"]))
+        # respects --cve-details-max cap
+        self.server.log.clear()
+        self.fetch("--all", "--sources", "zerowire,kev", "--cve-details",
+                   "--cve-details-max", "1", "--cve-api", self.server.url + "/cve/")
+        cve_gets = [p for m, p in self.server.log if m == "GET" and p.startswith("/cve/")]
+        self.assertEqual(len(cve_gets), 1)
 
 
 if __name__ == "__main__":

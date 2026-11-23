@@ -9,7 +9,7 @@ The instructions are one document. An assistant reads it when the user asks for 
 - [vuln-digest instructions](https://vuln-digest.secmy.app/README.md): the full document as plain Markdown - the working rules, 7 setup steps (0-6), the run steps, the digest format and the sources
 - [Full text in one file](https://vuln-digest.secmy.app/llms-full.txt): the same document, for tools that look for llms-full.txt
 - [Current version](https://vuln-digest.secmy.app/version.json): JSON with the current version of the instructions and a summary of each release, for jobs that run from a saved copy
-- [Helper script](https://vuln-digest.secmy.app/vuln_feed.py): Python, standard library only - fetches Zero Wire, CISA KEV, OSV and vendor RSS or Atom feeds, adds EPSS scores, checks feeds, and remembers what was delivered
+- [Helper script](https://vuln-digest.secmy.app/vuln_feed.py): Python, standard library only - fetches Zero Wire, CISA KEV, OSV, vendor RSS or Atom feeds, GitHub Security Advisories and NVD by CPE, adds EPSS and CVE.org details, checks feeds, and remembers what was delivered
 
 ## Contributing
 

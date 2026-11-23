@@ -9,6 +9,8 @@ Sources:
   kev       CISA Known Exploited Vulnerabilities catalog (JSON)
   osv       OSV.dev advisories for the packages listed in --packages
   feeds     any RSS or Atom feeds listed in --feeds (vendor security bulletins)
+  ghsa      GitHub Security Advisories for the repos and packages in --ghsa (optional GITHUB_TOKEN env)
+  nvd       NVD CVE 2.0 advisories for CPEs listed in --nvd (optional NVD_API_KEY env)
 
 How repeats are avoided:
   every item has a key (zerowire:<slug>, kev:<CVE>, osv:<ID>) and a list of
@@ -24,7 +26,7 @@ New sources:
   with its archive: its updates dated before the last digest count as seen
 
 Usage:
-  python3 -I vuln_feed.py fetch [--sources zerowire,kev] [--packages FILE] [--epss]
+  python3 -I vuln_feed.py fetch [--sources zerowire,kev,feeds,osv,ghsa,nvd] [--packages FILE] [--feeds FILE] [--ghsa FILE] [--nvd FILE] [--epss] [--cve-details]
       print new and updated items as JSON and save them to the snapshot file
   python3 -I vuln_feed.py mark
       mark exactly the items of the snapshot as delivered. Does not fetch again.
@@ -54,16 +56,20 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
-VERSION = "1.4.1"
+VERSION = "1.5.0"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 ZEROWIRE_FEED = "https://radar.cloudflare.com/zero-wire/feed"
 KEV_JSON = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 OSV_API = "https://api.osv.dev/v1/"
+GHSA_API = "https://api.github.com/"
+NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+CVE_ORG_API = "https://cveawg.mitre.org/api/cve/"
 EPSS_API = "https://api.first.org/data/v1/epss?cve="
 HERE = os.path.dirname(os.path.abspath(__file__))
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}")
@@ -84,8 +90,10 @@ def web_url(url):
 
 
 # S310: urlopen gets only URLs that web_url() checked
-def http_get(url, timeout=60, data=None):
+def http_get(url, timeout=60, data=None, extra_headers=None):
     headers = {"User-Agent": UA}
+    if extra_headers:
+        headers.update(extra_headers)
     if data is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(web_url(url), data=data, headers=headers)  # noqa: S310
@@ -455,6 +463,186 @@ def fetch_osv(packages, known, api=OSV_API, osv_file=None):
     return items, errors
 
 
+# ---------- GHSA (GitHub Security Advisories) ----------
+
+def read_ghsa(path):
+    """One entry per line: owner/repo (repository advisories) or package|ecosystem|name
+    (reviewed advisories that affect that package, such as package|npm|next)"""
+    out = []
+    for line in data_lines(path):
+        parts = [p.strip() for p in line.split("|")]
+        if parts[0] == "package" and len(parts) == 3 and all(parts):
+            out.append(("package", parts[1], parts[2]))
+        elif len(parts) == 1 and re.fullmatch(r"[\w.-]+/[\w.-]+", line) and ".." not in line:
+            out.append(("repo", line, ""))
+        else:
+            raise SystemExit(f"bad ghsa line: {line!r} (expected owner/repo or package|ecosystem|name)")
+    return out
+
+
+def token_ok(url):
+    """A token goes only over https, or to this machine (the tests)"""
+    u = urllib.parse.urlsplit(url)
+    return u.scheme == "https" or u.hostname in ("127.0.0.1", "localhost")
+
+
+def ghsa_headers(api):
+    headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    if os.environ.get("GITHUB_TOKEN") and token_ok(api):
+        headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
+    return headers
+
+
+def ghsa_cvss(adv):
+    vectors, score = [], None
+    sevs = adv.get("cvss_severities") or {}
+    for k in ("cvss_v4", "cvss_v3"):
+        c = sevs.get(k) or {}
+        if c.get("vector_string"):
+            vectors.append(c["vector_string"])
+        if c.get("score") is not None:
+            score = max(score, float(c["score"])) if score is not None else float(c["score"])
+    legacy = adv.get("cvss") or {}
+    if legacy.get("vector_string") and legacy["vector_string"] not in vectors:
+        vectors.append(legacy["vector_string"])
+    if score is None and legacy.get("score") is not None:
+        score = float(legacy["score"])
+    return vectors, score
+
+
+def ghsa_item(adv, sid):
+    gid = adv.get("ghsa_id") or ""
+    if not gid:
+        return None
+    cves = {adv["cve_id"]} if (adv.get("cve_id") or "").startswith("CVE-") else set()
+    for ident in adv.get("identifiers") or []:
+        val = ident.get("value") or ""
+        if ident.get("type") == "CVE" and val.startswith("CVE-"):
+            cves.add(val)
+    fixed, pkgs = set(), []
+    for v in adv.get("vulnerabilities") or []:
+        fpv = v.get("first_patched_version")
+        ver = fpv.get("identifier") if isinstance(fpv, dict) else fpv
+        if isinstance(ver, str) and ver.strip():
+            fixed.add(ver.strip())
+        p = v.get("package") or {}
+        if p.get("name"):
+            pkgs.append({"ecosystem": p.get("ecosystem") or "", "name": p["name"],
+                         "vulnerable_range": v.get("vulnerable_version_range") or ""})
+    fixed_list = sorted(fixed)
+    title = (adv.get("summary") or gid).strip()
+    severity = (adv.get("severity") or "").lower()
+    published = (adv.get("published_at") or adv.get("updated_at") or "")[:10]
+    modified = (adv.get("updated_at") or "")[:10]
+    vectors, score = ghsa_cvss(adv)
+    updates = [{"date": published, "text": "published", "id": fp("ghsa", gid)}]
+    if fixed_list:
+        updates.append({"date": modified or published, "text": "fixed in " + ", ".join(fixed_list),
+                        "id": fp("ghsa-fixed", gid, *fixed_list)})
+    item = {
+        "key": f"ghsa:{gid}",
+        "source": sid,
+        "title": title,
+        "link": adv.get("html_url") or f"https://github.com/advisories/{gid}",
+        "date": published,
+        "summary": (adv.get("description") or "")[:1500],
+        "cves": sorted(cves),
+        "fixed_versions": fixed_list,
+        "severity": severity,
+        "cvss": vectors,
+        "sig": fp(title, severity, *sorted(cves)),
+        "updates": updates,
+        "text": "",
+    }
+    if score is not None:
+        item["cvss_score"] = score
+    if pkgs:
+        item["packages"] = pkgs
+    return item
+
+
+def ghsa_sid(kind, target, name):
+    return f"ghsa:{target}" if kind == "repo" else f"ghsa:{target}:{name}"
+
+
+def fetch_ghsa_entry(kind, target, name, api):
+    if kind == "repo":
+        owner, repo = (urllib.parse.quote(p, safe="") for p in target.split("/", 1))
+        url = f"{api}repos/{owner}/{repo}/security-advisories?state=published&per_page=100"
+    else:  # the newest reviewed advisories that affect this package, not the whole ecosystem
+        url = api + "advisories?" + urllib.parse.urlencode(
+            {"type": "reviewed", "ecosystem": target, "affects": name, "per_page": 100})
+    sid = ghsa_sid(kind, target, name)
+    return [i for i in (ghsa_item(adv, sid) for adv in json.loads(http_get(url, extra_headers=ghsa_headers(api)))) if i]
+
+
+# ---------- NVD (CPE watch) ----------
+
+def read_nvd(path):
+    """One product per line: name|cpe:2.3:..."""
+    out = []
+    for line in data_lines(path):
+        name, _, cpe = (p.strip() for p in line.partition("|"))
+        if not (name and cpe.startswith("cpe:2.3:")):
+            raise SystemExit(f"bad nvd line: {line!r} (expected name|cpe:2.3:...)")
+        out.append((name, cpe))
+    return out
+
+
+def nvd_cvss(metrics):
+    vectors, score, severity = [], None, ""
+    for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+        for m in metrics.get(key) or []:
+            d = m.get("cvssData") or {}
+            if d.get("vectorString") and d["vectorString"] not in vectors:
+                vectors.append(d["vectorString"])
+            if score is None and d.get("baseScore") is not None:
+                score = float(d["baseScore"])
+                severity = d.get("baseSeverity") or m.get("baseSeverity") or ""
+    return vectors, score, severity
+
+
+def nvd_item(cve_obj, name):
+    if cve_obj.get("vulnStatus") == "Rejected":
+        return None
+    cid = cve_obj.get("id") or ""
+    if not cid:
+        return None
+    published = (cve_obj.get("published") or "")[:10]
+    descs = cve_obj.get("descriptions") or []
+    desc = next((d.get("value", "") for d in descs if d.get("lang") == "en"),
+                descs[0].get("value", "") if descs else "")
+    vectors, score, severity = nvd_cvss(cve_obj.get("metrics") or {})
+    item = {
+        "key": f"nvd:{cid}",
+        "source": f"nvd:{name}",
+        "title": f"{name}: {cid}",
+        "link": f"https://nvd.nist.gov/vuln/detail/{cid}",
+        "date": published,
+        "summary": desc[:1500],
+        "cves": [cid],
+        "product": name,
+        "severity": severity,
+        "cvss": vectors,
+        "sig": fp(severity, str(score or "")),
+        "updates": [{"date": published, "text": "published", "id": fp("nvd", cid)}],
+        "text": "",
+    }
+    if score is not None:
+        item["cvss_score"] = score
+    return item
+
+
+def nvd_window(today, nvd_days, since):
+    """The publication window, at most 119 days. Publication, not modification: NVD often
+    modifies old CVEs in bulk, and they are not news"""
+    today_d = datetime.date.fromisoformat(today)
+    start_d = today_d - datetime.timedelta(days=min(max(nvd_days, 1), 119))
+    if since:
+        start_d = min(start_d, max(datetime.date.fromisoformat(since), today_d - datetime.timedelta(days=119)))
+    return f"{start_d.isoformat()}T00:00:00.000Z", f"{today}T23:59:59.999Z"
+
+
 # ---------- enrichment ----------
 
 def add_kev_status(items, kev_items):
@@ -485,6 +673,81 @@ def add_epss(items):
         e = {c: scores[c] for c in i["cves"] if c in scores}
         if e:
             i["epss"] = e
+
+
+def parse_cve_org(data):
+    """Extract CVSS (from CNA or ADP) and affected version ranges from a CVE JSON 5.0 record"""
+    containers = data.get("containers") or {}
+    cna = containers.get("cna") or {}
+    blocks = [cna] + [x for x in (containers.get("adp") or []) if isinstance(x, dict)]
+    vectors, score, severity = [], None, ""
+    for block in blocks:
+        for m in block.get("metrics") or []:
+            for k in ("cvssV4_0", "cvssV3_1", "cvssV3_0"):
+                c = m.get(k) or {}
+                if c.get("vectorString") and c["vectorString"] not in vectors:
+                    vectors.append(c["vectorString"])
+                if score is None and c.get("baseScore") is not None:
+                    score = float(c["baseScore"])
+                    severity = c.get("baseSeverity") or ""
+    affected = []
+    for a in cna.get("affected") or []:
+        label = " / ".join(p for p in (a.get("vendor"), a.get("product"))
+                           if p and p.lower() not in ("n/a", "unspecified"))
+        parts = []
+        for v in a.get("versions") or []:
+            ver = v.get("version") or ""
+            if v.get("status") == "unaffected" and a.get("defaultStatus") == "affected" and ver:
+                parts.append(f"fixed >= {ver}")
+                continue
+            if v.get("status") not in ("affected", None):
+                continue
+            if v.get("lessThan"):
+                parts.append(f"{ver} < {v['lessThan']}".strip())
+            elif v.get("lessThanOrEqual"):
+                parts.append(f"{ver} <= {v['lessThanOrEqual']}".strip())
+            elif ver and ver.lower() not in ("n/a", "unspecified"):
+                parts.append(ver)
+        if label or parts:
+            line = f"{label}: {', '.join(parts)}" if label and parts else (label or ", ".join(parts))
+            if line not in affected:
+                affected.append(line)
+        if len(affected) >= 12:
+            break
+    out = {}
+    if score is not None:
+        out["score"] = score
+    if severity:
+        out["severity"] = severity
+    if vectors:
+        out["cvss"] = vectors
+    if affected:
+        out["affected"] = affected
+    return out
+
+
+def add_cve_details(items, api=CVE_ORG_API, max_cves=30):
+    """Enrich items missing CVSS or affected versions via the public CVE.org JSON 5.0 API"""
+    wanted, errors, details = [], [], {}
+    for i in items:
+        needs = (not i.get("cvss") and i.get("cvss_score") is None) or (not i.get("fixed_versions") and not i.get("affected"))
+        if not needs:
+            continue
+        for c in i["cves"]:
+            if c not in wanted:
+                wanted.append(c)
+    for cve in wanted[:max(max_cves, 0)]:
+        try:
+            info = parse_cve_org(json.loads(http_get(api + urllib.parse.quote(cve, safe=""))))
+            if info:
+                details[cve] = info
+        except Exception as e:
+            errors.append({"source": "cve_org", "error": f"{cve}: {type(e).__name__}: {e}", "partial": True})
+    for i in items:
+        d = {c: details[c] for c in i["cves"] if c in details}
+        if d:
+            i["cve_details"] = d
+    return errors
 
 
 # ---------- state ----------
@@ -613,10 +876,58 @@ def collect(a, known):
                 found, errs = fetch_osv(read_packages(a.packages) if a.packages else [], known, a.osv_api, a.osv_file)
                 items += found
                 errors += errs
+            elif src == "ghsa":
+                if not a.ghsa:
+                    raise ValueError("ghsa needs --ghsa FILE")
+                seen_ghsa = set()
+                for kind, target, name in read_ghsa(a.ghsa):
+                    sid = ghsa_sid(kind, target, name)
+                    try:
+                        for it in fetch_ghsa_entry(kind, target, name, a.ghsa_api):
+                            if it["key"] not in seen_ghsa:
+                                seen_ghsa.add(it["key"])
+                                items.append(it)
+                        done.add(sid)
+                    except Exception as e:
+                        errors.append({"source": sid, "error": f"{type(e).__name__}: {e}"})
+            elif src == "nvd":
+                if not a.nvd:
+                    raise ValueError("nvd needs --nvd FILE")
+                nvd_key = os.environ.get("NVD_API_KEY")
+                headers = {"apiKey": nvd_key} if nvd_key and token_ok(a.nvd_api) else None
+                delay = a.nvd_delay if a.nvd_delay is not None else (0.7 if nvd_key else 6.5)
+                start_ts, end_ts = nvd_window(a.today, a.nvd_days, a.since)
+                seen_nvd = {}
+                for idx, (name, cpe) in enumerate(read_nvd(a.nvd)):
+                    if idx and delay > 0:
+                        time.sleep(delay)
+                    sid = f"nvd:{name}"
+                    try:
+                        params = urllib.parse.urlencode({"virtualMatchString": cpe, "pubStartDate": start_ts,
+                                                         "pubEndDate": end_ts, "resultsPerPage": 2000})
+                        data = json.loads(http_get(f"{a.nvd_api}?{params}", extra_headers=headers))
+                        vulns = data.get("vulnerabilities") or []
+                        partial = (data.get("totalResults") or 0) > len(vulns)
+                        if partial:
+                            errors.append({"source": sid, "error": f"{data['totalResults']} results, first {len(vulns)} read",
+                                           "partial": True})
+                        for v in vulns:
+                            it = nvd_item(v.get("cve") or {}, name)
+                            if not it or it["date"] < start_ts[:10]:  # also when an API ignores pubStartDate
+                                continue
+                            if it["key"] in seen_nvd:
+                                seen_nvd[it["key"]].setdefault("products", [seen_nvd[it["key"]]["product"]]).append(name)
+                            else:
+                                seen_nvd[it["key"]] = it
+                                items.append(it)
+                        if not partial:  # a cut-off answer stays pending, see baseline()
+                            done.add(sid)
+                    except Exception as e:
+                        errors.append({"source": sid, "error": f"{type(e).__name__}: {e}"})
             else:
                 raise ValueError(f"unknown source {src!r}")
             # osv counts as read once its queries answered: an advisory that failed comes later as new
-            if src == "osv" or src != "feeds" and not any(e["source"] == src for e in errors):
+            if src == "osv" or src not in ("feeds", "ghsa", "nvd") and not any(e["source"] == src for e in errors):
                 done.add(src)
         except Exception as e:  # one source down must not hide the others
             errors.append({"source": src, "error": f"{type(e).__name__}: {e}"})
@@ -655,7 +966,12 @@ def main():
     ap.add_argument("--sources", default="zerowire,kev")
     ap.add_argument("--packages", help="file with ecosystem|name|version lines for OSV")
     ap.add_argument("--feeds", help="file with name|url lines: vendor RSS or Atom feeds for the feeds source")
+    ap.add_argument("--ghsa", help="file with owner/repo or package|ecosystem|name lines for GHSA")
+    ap.add_argument("--nvd", help="file with name|cpe:2.3:... lines for NVD")
+    ap.add_argument("--nvd-days", type=int, default=30, help="NVD publication window in days (1-119, default 30)")
     ap.add_argument("--epss", action="store_true", help="add EPSS scores to the result")
+    ap.add_argument("--cve-details", action="store_true", help="enrich items missing CVSS/versions via CVE.org")
+    ap.add_argument("--cve-details-max", type=int, default=30, help="max CVEs to enrich via CVE.org per run (default 30)")
     ap.add_argument("--kev-max-age", type=int, default=30,
                     help="show KEV entries added in the last N days only (default 30)")
     ap.add_argument("--since", metavar="YYYY-MM-DD",
@@ -668,6 +984,10 @@ def main():
     ap.add_argument("--kev-file")
     ap.add_argument("--osv-file")
     ap.add_argument("--osv-api", default=OSV_API, help=argparse.SUPPRESS)
+    ap.add_argument("--ghsa-api", default=GHSA_API, help=argparse.SUPPRESS)
+    ap.add_argument("--nvd-api", default=NVD_API, help=argparse.SUPPRESS)
+    ap.add_argument("--nvd-delay", type=float, default=None, help=argparse.SUPPRESS)
+    ap.add_argument("--cve-api", default=CVE_ORG_API, help=argparse.SUPPRESS)
     ap.add_argument("--today", default=datetime.date.today().isoformat(), help=argparse.SUPPRESS)
     a = ap.parse_args()
     today = a.today
@@ -762,6 +1082,9 @@ def main():
             add_epss(result)
         except Exception as e:
             errors.append({"source": "epss", "error": f"{type(e).__name__}: {e}"})
+
+    if a.cve_details and result:
+        errors += add_cve_details(result, a.cve_api, a.cve_details_max)
 
     result.sort(key=lambda i: max([u["date"] for u in i["new_updates"]] or [i["date"]]), reverse=True)
     out = {"generated": today, "tool_version": VERSION, "sources": sources,

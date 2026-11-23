@@ -46,9 +46,9 @@ for id in $(grep -oE 'href="#[^"]+"' "$LANDING" | sed -E 's/href="#//; s/"$//' |
   grep -qE "id=\"$id\"" "$LANDING" || fail "anchor without target: #$id"
 done
 
-# The helper script size claim on the landing page stays true (about 700 lines)
+# The helper script size claim on the landing page stays true (about 1,100 lines)
 lines="$(wc -l < tools/vuln_feed.py)"
-[ "$lines" -ge 620 ] && [ "$lines" -le 800 ] || fail "vuln_feed.py has $lines lines: update the landing page text"
+[ "$lines" -ge 950 ] && [ "$lines" -le 1250 ] || fail "vuln_feed.py has $lines lines: update the landing page text"
 
 # --- The instructions page ---
 grep -qF '<nav class="site-header"' "$DOCS" || fail 'the instructions page has no header with a link to the landing page'
