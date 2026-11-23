@@ -603,13 +603,13 @@ class VulnFeedTest(unittest.TestCase):
 
         def serve_eco(query, hdrs):
             self.assertIn("ecosystem=npm", query)
-            self.assertIn("severity=high", query)
+            self.assertIn("affects=widget", query)  # one package, not the whole ecosystem
             return json.dumps(eco_advs)
 
         self.server.pages["/repos/acme/proxy/security-advisories"] = serve_repo
         self.server.pages["/advisories"] = serve_eco
         ghsa_file = os.path.join(self.dir, "ghsa.txt")
-        write(ghsa_file, "# repos and ecosystems\nacme/proxy\necosystem|npm|high\nrepo|acme/missing\n")
+        write(ghsa_file, "# repos and packages\nacme/proxy\npackage|npm|widget\nacme/missing\n")
         out = self.fetch("--all", "--sources", "kev,ghsa", "--ghsa", ghsa_file,
                          "--ghsa-api", self.server.url + "/", env={"GITHUB_TOKEN": "example"})
         self.assertEqual(seen_auth, ["Bearer example"])
@@ -700,7 +700,8 @@ class VulnFeedTest(unittest.TestCase):
                          "--nvd-api", self.server.url + "/cves", "--nvd-delay", "0",
                          env={"NVD_API_KEY": "example"})
         self.assertEqual(seen_keys, ["example", "example"])
-        self.assertTrue(all("lastModStartDate=" in q and "lastModEndDate=" in q for q in seen_queries))
+        # by publication date: old CVEs that NVD modifies again are not news
+        self.assertTrue(all("pubStartDate=" in q and "pubEndDate=" in q and "lastMod" not in q for q in seen_queries))
         self.assertEqual([e["source"] for e in out["errors"]], ["nvd:broken"])
         self.assertEqual(self.keys(out), {"nvd:CVE-2026-7001": "new"})
         item = out["items"][0]
@@ -714,8 +715,26 @@ class VulnFeedTest(unittest.TestCase):
         seen_queries.clear()
         out2 = self.fetch("--all", "--sources", "nvd", "--nvd", nvd_file, "--nvd-days", "200",
                           "--nvd-api", self.server.url + "/cves", "--nvd-delay", "0")
-        self.assertIn("lastModStartDate=2026-07-24T00%3A00%3A00.000Z", seen_queries[0])
+        self.assertIn("pubStartDate=2026-07-24T00%3A00%3A00.000Z", seen_queries[0])
         self.assertTrue(any(e["source"] == "nvd:fortios" and e.get("partial") for e in out2["errors"]))
+        # a cut-off answer does not count as read in full
+        write(nvd_file, "fortios|cpe:2.3:o:fortinet:fortios\npanos|cpe:2.3:o:paloaltonetworks:pan-os\n")
+        self.fetch("--sources", "nvd", "--nvd", nvd_file, "--nvd-api", self.server.url + "/cves", "--nvd-delay", "0",
+                   today="2026-11-21")
+        self.assertNotIn("nvd:panos", load(self.state)["sources"])  # read next time with the first cut-off
+
+    def test_nvd_old_cve_modified_again_is_not_news(self):
+        payload = {"totalResults": 0, "vulnerabilities": []}
+        self.server.pages["/cves"] = lambda q, h: json.dumps(payload)
+        nvd = os.path.join(self.dir, "nvd.txt")
+        write(nvd, "fortios|cpe:2.3:o:fortinet:fortios\n")
+        args = ("--sources", "nvd", "--nvd", nvd, "--nvd-api", self.server.url + "/cves", "--nvd-delay", "0")
+        self.fetch("--since", "2026-11-13", *args)
+        self.run_tool("mark")
+        payload.update(totalResults=1, vulnerabilities=[{"cve": {
+            "id": "CVE-2019-0001", "published": "2019-05-01T00:00:00.000", "lastModified": "2026-11-20T00:00:00.000",
+            "vulnStatus": "Modified", "descriptions": [], "metrics": {}}}])
+        self.assertEqual(self.fetch(*args, today="2026-11-21")["items"], [])
 
     # ---------- CVE.org enrichment ----------
 

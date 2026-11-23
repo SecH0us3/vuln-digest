@@ -9,7 +9,7 @@ Sources:
   kev       CISA Known Exploited Vulnerabilities catalog (JSON)
   osv       OSV.dev advisories for the packages listed in --packages
   feeds     any RSS or Atom feeds listed in --feeds (vendor security bulletins)
-  ghsa      GitHub Security Advisories for repos/ecosystems in --ghsa (optional GITHUB_TOKEN env)
+  ghsa      GitHub Security Advisories for the repos and packages in --ghsa (optional GITHUB_TOKEN env)
   nvd       NVD CVE 2.0 advisories for CPEs listed in --nvd (optional NVD_API_KEY env)
 
 How repeats are avoided:
@@ -466,33 +466,30 @@ def fetch_osv(packages, known, api=OSV_API, osv_file=None):
 # ---------- GHSA (GitHub Security Advisories) ----------
 
 def read_ghsa(path):
-    """One entry per line: owner/repo, repo|owner/repo, or ecosystem|name[|severity]"""
+    """One entry per line: owner/repo (repository advisories) or package|ecosystem|name
+    (reviewed advisories that affect that package, such as package|npm|next)"""
     out = []
     for line in data_lines(path):
-        if "|" not in line and line.count("/") == 1:
-            kind, target, sev = "repo", line, ""
+        parts = [p.strip() for p in line.split("|")]
+        if parts[0] == "package" and len(parts) == 3 and all(parts):
+            out.append(("package", parts[1], parts[2]))
+        elif len(parts) == 1 and re.fullmatch(r"[\w.-]+/[\w.-]+", line) and ".." not in line:
+            out.append(("repo", line, ""))
         else:
-            parts = [p.strip() for p in line.split("|")]
-            kind = parts[0]
-            target = parts[1] if len(parts) > 1 else ""
-            sev = parts[2].lower() if len(parts) > 2 else ""
-        if kind == "repo":
-            owner, _, repo = target.partition("/")
-            if not (owner and repo) or "/" in repo or any(c.isspace() for c in target) or ".." in (owner, repo):
-                raise SystemExit(f"bad ghsa repo: {line!r} (expected owner/repo)")
-            out.append(("repo", f"{owner}/{repo}", ""))
-        elif kind == "ecosystem" and target and sev in ("", "low", "medium", "high", "critical"):
-            out.append(("ecosystem", target, sev))
-        else:
-            raise SystemExit(f"bad ghsa line: {line!r} (expected owner/repo, repo|owner/repo, or ecosystem|name[|severity])")
+            raise SystemExit(f"bad ghsa line: {line!r} (expected owner/repo or package|ecosystem|name)")
     return out
 
 
-def ghsa_headers():
+def token_ok(url):
+    """A token goes only over https, or to this machine (the tests)"""
+    u = urllib.parse.urlsplit(url)
+    return u.scheme == "https" or u.hostname in ("127.0.0.1", "localhost")
+
+
+def ghsa_headers(api):
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
-    auth = os.environ.get("GITHUB_TOKEN")
-    if auth:
-        headers["Authorization"] = f"Bearer {auth}"
+    if os.environ.get("GITHUB_TOKEN") and token_ok(api):
+        headers["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
     return headers
 
 
@@ -564,20 +561,19 @@ def ghsa_item(adv, sid):
     return item
 
 
-def fetch_ghsa_entry(kind, target, sev, api):
+def ghsa_sid(kind, target, name):
+    return f"ghsa:{target}" if kind == "repo" else f"ghsa:{target}:{name}"
+
+
+def fetch_ghsa_entry(kind, target, name, api):
     if kind == "repo":
-        owner, repo = target.split("/", 1)
-        url = (f"{api}repos/{urllib.parse.quote(owner, safe='')}/"
-               f"{urllib.parse.quote(repo, safe='')}/security-advisories?state=published&per_page=100")
-        sid = f"ghsa:{target}"
-    else:
-        params = {"type": "reviewed", "ecosystem": target, "per_page": 100}
-        if sev:
-            params["severity"] = sev
-        url = api + "advisories?" + urllib.parse.urlencode(params)
-        sid = f"ghsa:ecosystem:{target}"
-    raw = json.loads(http_get(url, extra_headers=ghsa_headers()))
-    return sid, [i for i in (ghsa_item(adv, sid) for adv in raw) if i]
+        owner, repo = (urllib.parse.quote(p, safe="") for p in target.split("/", 1))
+        url = f"{api}repos/{owner}/{repo}/security-advisories?state=published&per_page=100"
+    else:  # the newest reviewed advisories that affect this package, not the whole ecosystem
+        url = api + "advisories?" + urllib.parse.urlencode(
+            {"type": "reviewed", "ecosystem": target, "affects": name, "per_page": 100})
+    sid = ghsa_sid(kind, target, name)
+    return [i for i in (ghsa_item(adv, sid) for adv in json.loads(http_get(url, extra_headers=ghsa_headers(api)))) if i]
 
 
 # ---------- NVD (CPE watch) ----------
@@ -638,13 +634,12 @@ def nvd_item(cve_obj, name):
 
 
 def nvd_window(today, nvd_days, since):
+    """The publication window, at most 119 days. Publication, not modification: NVD often
+    modifies old CVEs in bulk, and they are not news"""
     today_d = datetime.date.fromisoformat(today)
     start_d = today_d - datetime.timedelta(days=min(max(nvd_days, 1), 119))
     if since:
-        earliest = today_d - datetime.timedelta(days=119)
-        since_d = datetime.date.fromisoformat(since)
-        if since_d < start_d:
-            start_d = max(since_d, earliest)
+        start_d = min(start_d, max(datetime.date.fromisoformat(since), today_d - datetime.timedelta(days=119)))
     return f"{start_d.isoformat()}T00:00:00.000Z", f"{today}T23:59:59.999Z"
 
 
@@ -885,11 +880,10 @@ def collect(a, known):
                 if not a.ghsa:
                     raise ValueError("ghsa needs --ghsa FILE")
                 seen_ghsa = set()
-                for kind, target, sev in read_ghsa(a.ghsa):
-                    sid = f"ghsa:{target}" if kind == "repo" else f"ghsa:ecosystem:{target}"
+                for kind, target, name in read_ghsa(a.ghsa):
+                    sid = ghsa_sid(kind, target, name)
                     try:
-                        sid, found = fetch_ghsa_entry(kind, target, sev, a.ghsa_api)
-                        for it in found:
+                        for it in fetch_ghsa_entry(kind, target, name, a.ghsa_api):
                             if it["key"] not in seen_ghsa:
                                 seen_ghsa.add(it["key"])
                                 items.append(it)
@@ -900,7 +894,7 @@ def collect(a, known):
                 if not a.nvd:
                     raise ValueError("nvd needs --nvd FILE")
                 nvd_key = os.environ.get("NVD_API_KEY")
-                headers = {"apiKey": nvd_key} if nvd_key else None
+                headers = {"apiKey": nvd_key} if nvd_key and token_ok(a.nvd_api) else None
                 delay = a.nvd_delay if a.nvd_delay is not None else (0.7 if nvd_key else 6.5)
                 start_ts, end_ts = nvd_window(a.today, a.nvd_days, a.since)
                 seen_nvd = {}
@@ -909,23 +903,25 @@ def collect(a, known):
                         time.sleep(delay)
                     sid = f"nvd:{name}"
                     try:
-                        params = urllib.parse.urlencode({"virtualMatchString": cpe, "lastModStartDate": start_ts,
-                                                         "lastModEndDate": end_ts, "resultsPerPage": 2000})
+                        params = urllib.parse.urlencode({"virtualMatchString": cpe, "pubStartDate": start_ts,
+                                                         "pubEndDate": end_ts, "resultsPerPage": 2000})
                         data = json.loads(http_get(f"{a.nvd_api}?{params}", extra_headers=headers))
                         vulns = data.get("vulnerabilities") or []
-                        if (data.get("totalResults") or 0) > len(vulns):
+                        partial = (data.get("totalResults") or 0) > len(vulns)
+                        if partial:
                             errors.append({"source": sid, "error": f"{data['totalResults']} results, first {len(vulns)} read",
                                            "partial": True})
                         for v in vulns:
                             it = nvd_item(v.get("cve") or {}, name)
-                            if not it:
+                            if not it or it["date"] < start_ts[:10]:  # also when an API ignores pubStartDate
                                 continue
                             if it["key"] in seen_nvd:
                                 seen_nvd[it["key"]].setdefault("products", [seen_nvd[it["key"]]["product"]]).append(name)
                             else:
                                 seen_nvd[it["key"]] = it
                                 items.append(it)
-                        done.add(sid)
+                        if not partial:  # a cut-off answer stays pending, see baseline()
+                            done.add(sid)
                     except Exception as e:
                         errors.append({"source": sid, "error": f"{type(e).__name__}: {e}"})
             else:
@@ -970,9 +966,9 @@ def main():
     ap.add_argument("--sources", default="zerowire,kev")
     ap.add_argument("--packages", help="file with ecosystem|name|version lines for OSV")
     ap.add_argument("--feeds", help="file with name|url lines: vendor RSS or Atom feeds for the feeds source")
-    ap.add_argument("--ghsa", help="file with owner/repo or ecosystem|name[|severity] lines for GHSA")
+    ap.add_argument("--ghsa", help="file with owner/repo or package|ecosystem|name lines for GHSA")
     ap.add_argument("--nvd", help="file with name|cpe:2.3:... lines for NVD")
-    ap.add_argument("--nvd-days", type=int, default=30, help="NVD modification window in days (1-120, default 30)")
+    ap.add_argument("--nvd-days", type=int, default=30, help="NVD publication window in days (1-119, default 30)")
     ap.add_argument("--epss", action="store_true", help="add EPSS scores to the result")
     ap.add_argument("--cve-details", action="store_true", help="enrich items missing CVSS/versions via CVE.org")
     ap.add_argument("--cve-details-max", type=int, default=30, help="max CVEs to enrich via CVE.org per run (default 30)")
