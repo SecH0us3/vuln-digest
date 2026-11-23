@@ -74,7 +74,7 @@ The crawler policy is: everything is allowed, for search, for fetching on a user
 
 ## Versions and the plugin
 
-The version is written in three places and must be the same: the `Version` line at the top of `README.md`, `version` in `.claude-plugin/plugin.json`, and `version` in `site/version.json`. `tools/tests/test_plugin.py` and `site/check.sh` check that
+The version is written in four places and must be the same: the `Version` line at the top of `README.md`, `version` in `.claude-plugin/plugin.json`, `version` in `site/version.json`, and `VERSION` in `tools/vuln_feed.py`. `tools/tests/test_plugin.py` and `site/check.sh` check that
 
 - raise the version when a change to `README.md` or `tools/vuln_feed.py` should reach users who saved a copy: a new source, a fix in the run steps, a new option. Typos and changes to the site alone need no new version
 - the first number: the profile or the job prompt must change. The second: new behaviour that works with the old profile. The third: fixes

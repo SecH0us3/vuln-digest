@@ -2,7 +2,7 @@
   "version": "1.4.1",
   "sha256": {
     "README.md": "8eba623026825df4509a8fc110935ef669cb0dadafaefd648a92b0163de4775f",
-    "vuln_feed.py": "57fbe7fe274b0f9d0a39014c283efd933183b93ebe1e1c4db7c8ca9a047909fd"
+    "vuln_feed.py": "7a3b471251a01cd8f4fd7ff58e892e9d8f0951f760c3f6218e3e92a81aeb4706"
   },
   "releases": [
     {
