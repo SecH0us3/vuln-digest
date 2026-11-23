@@ -1,10 +1,17 @@
 {
-  "version": "1.5.0",
+  "version": "1.6.0",
   "sha256": {
-    "README.md": "6d22aad0f01eb84aa008c98b2cd41b7a9a6bdc10255324f47e81de7bcdaa5720",
-    "vuln_feed.py": "31cf89ee818bc68502c506ea1a9a272ed4ea583f047bb8095463d516532736e6"
+    "README.md": "1cb52f753174effb02eb6bfe60558d4f360e5c132e766edc37c94ed3d4c14a8f",
+    "vuln_feed.py": "15e4b309c9066f0d6b3249c77479970d0a38003936519b408a2697ca0ea7cc03",
+    "vuln_stack.py": "e50988e21d3b361a4985d2417144befca6843f6d7503ecb37e9324eab1439dfd",
+    "catalog.json": "19590202402a100dc7eedf1cc6e46e223a85387468c80b3e84fbb4d1f36ac4c2"
   },
   "releases": [
+    {
+      "version": "1.6.0",
+      "date": "2026-11-23",
+      "summary": "New setup helper vuln_stack.py (scan, suggest-sources, discover-feeds, find-cpe via services.nvd.nist.gov) and curated catalog.json of verified feeds, GHSA repos and NVD CPEs"
+    },
     {
       "version": "1.5.0",
       "date": "2026-11-23",

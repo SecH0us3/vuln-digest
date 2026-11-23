@@ -1,0 +1,367 @@
+{
+  "version": "1.6.0",
+  "entries": [
+    {
+      "id": "ubuntu",
+      "name": "Ubuntu",
+      "aliases": ["ubuntu linux", "usn"],
+      "kind": "os",
+      "sources": [
+        {"type": "feed", "name": "ubuntu", "url": "https://ubuntu.com/security/notices/rss.xml"}
+      ]
+    },
+    {
+      "id": "debian",
+      "name": "Debian",
+      "aliases": ["debian linux", "dsa"],
+      "kind": "os",
+      "sources": [
+        {"type": "feed", "name": "debian", "url": "https://www.debian.org/security/dsa"}
+      ]
+    },
+    {
+      "id": "redhat",
+      "name": "Red Hat Enterprise Linux",
+      "aliases": ["rhel", "red hat", "rhsa"],
+      "kind": "os",
+      "sources": [
+        {"type": "feed", "name": "redhat", "url": "https://security.access.redhat.com/data/meta/v1/rhsa.rss"}
+      ]
+    },
+    {
+      "id": "alpine",
+      "name": "Alpine Linux",
+      "aliases": ["alpine"],
+      "kind": "os",
+      "sources": [
+        {"type": "feed", "name": "alpine", "url": "https://gitlab.alpinelinux.org/alpine/aports/-/issues.atom?state=closed&label_name[]=tag%3Asecurity"}
+      ]
+    },
+    {
+      "id": "nodejs",
+      "name": "Node.js",
+      "aliases": ["node", "nodejs"],
+      "kind": "runtime",
+      "sources": [
+        {"type": "feed", "name": "nodejs", "url": "https://nodejs.org/en/feed/vulnerability.xml"}
+      ]
+    },
+    {
+      "id": "php",
+      "name": "PHP",
+      "aliases": ["php-fpm"],
+      "kind": "runtime",
+      "sources": [
+        {"type": "ghsa", "repo": "php/php-src"}
+      ]
+    },
+    {
+      "id": "ruby",
+      "name": "Ruby",
+      "aliases": ["mri"],
+      "kind": "runtime",
+      "sources": [
+        {"type": "ghsa", "repo": "ruby/ruby"}
+      ]
+    },
+    {
+      "id": "dotnet",
+      "name": ".NET",
+      "aliases": ["dotnet", "asp.net", "asp.net core", "kestrel"],
+      "kind": "runtime",
+      "sources": [
+        {"type": "ghsa", "repo": "dotnet/runtime"},
+        {"type": "ghsa", "repo": "dotnet/aspnetcore"}
+      ]
+    },
+    {
+      "id": "rust",
+      "name": "Rust",
+      "aliases": ["rustc"],
+      "kind": "runtime",
+      "sources": [
+        {"type": "ghsa", "repo": "rust-lang/rust"}
+      ]
+    },
+    {
+      "id": "django",
+      "name": "Django",
+      "aliases": [],
+      "kind": "framework",
+      "sources": [
+        {"type": "feed", "name": "django", "url": "https://www.djangoproject.com/rss/weblog/"}
+      ]
+    },
+    {
+      "id": "rails",
+      "name": "Ruby on Rails",
+      "aliases": ["rails"],
+      "kind": "framework",
+      "sources": [
+        {"type": "ghsa", "repo": "rails/rails"}
+      ]
+    },
+    {
+      "id": "nextjs",
+      "name": "Next.js",
+      "aliases": ["next", "nextjs"],
+      "kind": "framework",
+      "sources": [
+        {"type": "ghsa", "repo": "vercel/next.js"}
+      ]
+    },
+    {
+      "id": "spring",
+      "name": "Spring",
+      "aliases": ["spring boot", "spring framework", "spring security"],
+      "kind": "framework",
+      "sources": [
+        {"type": "feed", "name": "spring", "url": "https://spring.io/security.atom"}
+      ]
+    },
+    {
+      "id": "wordpress",
+      "name": "WordPress",
+      "aliases": ["wp"],
+      "kind": "cms",
+      "sources": [
+        {"type": "feed", "name": "wordpress", "url": "https://wordpress.org/news/category/security/feed/"}
+      ]
+    },
+    {
+      "id": "nginx",
+      "name": "nginx",
+      "aliases": ["nginx plus", "ingress-nginx"],
+      "kind": "web",
+      "sources": [
+        {"type": "nvd", "name": "nginx", "cpe": "cpe:2.3:a:f5:nginx"}
+      ]
+    },
+    {
+      "id": "apache-httpd",
+      "name": "Apache HTTP Server",
+      "aliases": ["apache", "httpd", "apache2"],
+      "kind": "web",
+      "sources": [
+        {"type": "nvd", "name": "apache-httpd", "cpe": "cpe:2.3:a:apache:http_server"}
+      ]
+    },
+    {
+      "id": "traefik",
+      "name": "Traefik",
+      "aliases": ["traefik proxy"],
+      "kind": "web",
+      "sources": [
+        {"type": "ghsa", "repo": "traefik/traefik"}
+      ]
+    },
+    {
+      "id": "envoy",
+      "name": "Envoy",
+      "aliases": ["envoy proxy", "envoyproxy"],
+      "kind": "web",
+      "sources": [
+        {"type": "ghsa", "repo": "envoyproxy/envoy"}
+      ]
+    },
+    {
+      "id": "caddy",
+      "name": "Caddy",
+      "aliases": ["caddyserver"],
+      "kind": "web",
+      "sources": [
+        {"type": "ghsa", "repo": "caddyserver/caddy"}
+      ]
+    },
+    {
+      "id": "haproxy",
+      "name": "HAProxy",
+      "aliases": [],
+      "kind": "web",
+      "sources": [
+        {"type": "nvd", "name": "haproxy", "cpe": "cpe:2.3:a:haproxy:haproxy"}
+      ]
+    },
+    {
+      "id": "kubernetes",
+      "name": "Kubernetes",
+      "aliases": ["k8s", "kube-apiserver", "kubelet"],
+      "kind": "platform",
+      "sources": [
+        {"type": "feed", "name": "kubernetes", "url": "https://kubernetes.io/docs/reference/issues-security/official-cve-feed/feed.xml"}
+      ]
+    },
+    {
+      "id": "docker",
+      "name": "Docker",
+      "aliases": ["moby", "docker engine", "containerd"],
+      "kind": "platform",
+      "sources": [
+        {"type": "ghsa", "repo": "moby/moby"},
+        {"type": "ghsa", "repo": "containerd/containerd"}
+      ]
+    },
+    {
+      "id": "argocd",
+      "name": "Argo CD",
+      "aliases": ["argocd", "argo-cd"],
+      "kind": "platform",
+      "sources": [
+        {"type": "ghsa", "repo": "argoproj/argo-cd"}
+      ]
+    },
+    {
+      "id": "helm",
+      "name": "Helm",
+      "aliases": [],
+      "kind": "platform",
+      "sources": [
+        {"type": "ghsa", "repo": "helm/helm"}
+      ]
+    },
+    {
+      "id": "cilium",
+      "name": "Cilium",
+      "aliases": [],
+      "kind": "platform",
+      "sources": [
+        {"type": "ghsa", "repo": "cilium/cilium"}
+      ]
+    },
+    {
+      "id": "cert-manager",
+      "name": "cert-manager",
+      "aliases": [],
+      "kind": "platform",
+      "sources": [
+        {"type": "ghsa", "repo": "cert-manager/cert-manager"}
+      ]
+    },
+    {
+      "id": "prometheus",
+      "name": "Prometheus",
+      "aliases": [],
+      "kind": "platform",
+      "sources": [
+        {"type": "ghsa", "repo": "prometheus/prometheus"}
+      ]
+    },
+    {
+      "id": "keycloak",
+      "name": "Keycloak",
+      "aliases": [],
+      "kind": "auth",
+      "sources": [
+        {"type": "ghsa", "repo": "keycloak/keycloak"}
+      ]
+    },
+    {
+      "id": "gitlab",
+      "name": "GitLab",
+      "aliases": ["gitlab ce", "gitlab ee"],
+      "kind": "devops",
+      "sources": [
+        {"type": "feed", "name": "gitlab", "url": "https://docs.gitlab.com/releases/patch-releases.xml"}
+      ]
+    },
+    {
+      "id": "postgresql",
+      "name": "PostgreSQL",
+      "aliases": ["postgres", "pgsql"],
+      "kind": "database",
+      "sources": [
+        {"type": "feed", "name": "postgresql", "url": "https://www.postgresql.org/news/pgsql.rss"}
+      ]
+    },
+    {
+      "id": "redis",
+      "name": "Redis",
+      "aliases": [],
+      "kind": "database",
+      "sources": [
+        {"type": "ghsa", "repo": "redis/redis"}
+      ]
+    },
+    {
+      "id": "valkey",
+      "name": "Valkey",
+      "aliases": [],
+      "kind": "database",
+      "sources": [
+        {"type": "ghsa", "repo": "valkey-io/valkey"}
+      ]
+    },
+    {
+      "id": "openssl",
+      "name": "OpenSSL",
+      "aliases": [],
+      "kind": "crypto",
+      "sources": [
+        {"type": "nvd", "name": "openssl", "cpe": "cpe:2.3:a:openssl:openssl"}
+      ]
+    },
+    {
+      "id": "chrome",
+      "name": "Google Chrome",
+      "aliases": ["chrome", "chromium", "v8"],
+      "kind": "browser",
+      "sources": [
+        {"type": "feed", "name": "chrome", "url": "https://chromereleases.googleblog.com/feeds/posts/default"}
+      ]
+    },
+    {
+      "id": "fortios",
+      "name": "FortiOS",
+      "aliases": ["fortigate", "fortinet"],
+      "kind": "network",
+      "sources": [
+        {"type": "nvd", "name": "fortios", "cpe": "cpe:2.3:o:fortinet:fortios"}
+      ]
+    },
+    {
+      "id": "pan-os",
+      "name": "PAN-OS",
+      "aliases": ["palo alto", "paloalto", "globalprotect"],
+      "kind": "network",
+      "sources": [
+        {"type": "nvd", "name": "pan-os", "cpe": "cpe:2.3:o:paloaltonetworks:pan-os"}
+      ]
+    },
+    {
+      "id": "vmware-esxi",
+      "name": "VMware ESXi",
+      "aliases": ["esxi", "vsphere", "vmware"],
+      "kind": "virtualization",
+      "sources": [
+        {"type": "nvd", "name": "esxi", "cpe": "cpe:2.3:o:vmware:esxi"}
+      ]
+    },
+    {
+      "id": "cisco-ios-xe",
+      "name": "Cisco IOS XE",
+      "aliases": ["ios xe", "ios-xe", "cisco"],
+      "kind": "network",
+      "sources": [
+        {"type": "nvd", "name": "cisco-ios-xe", "cpe": "cpe:2.3:o:cisco:ios_xe"}
+      ]
+    },
+    {
+      "id": "ivanti-connect-secure",
+      "name": "Ivanti Connect Secure",
+      "aliases": ["ivanti", "pulse secure"],
+      "kind": "network",
+      "sources": [
+        {"type": "nvd", "name": "ivanti-cs", "cpe": "cpe:2.3:a:ivanti:connect_secure"}
+      ]
+    },
+    {
+      "id": "citrix-netscaler",
+      "name": "Citrix NetScaler",
+      "aliases": ["netscaler", "citrix adc", "citrix gateway"],
+      "kind": "network",
+      "sources": [
+        {"type": "nvd", "name": "netscaler", "cpe": "cpe:2.3:a:citrix:netscaler_application_delivery_controller"}
+      ]
+    }
+  ]
+}

@@ -62,7 +62,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 ZEROWIRE_FEED = "https://radar.cloudflare.com/zero-wire/feed"
 KEV_JSON = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"

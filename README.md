@@ -2,7 +2,7 @@
 
 This file is a task for an AI assistant: Claude, ChatGPT, Gemini, Codex, Cursor or any other. The user gives the assistant this file and asks it to set up a vulnerability digest. The address of this file is https://vuln-digest.secmy.app/README.md
 
-Version: 1.5.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
+Version: 1.6.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
 
 If you are a person, the overview is at https://vuln-digest.secmy.app/ - give the address of this file to your AI assistant and it does the rest
 
@@ -73,7 +73,7 @@ Do not clone, install or run anything, and do not change anything. Do not copy s
 
 Keep what the user confirms. Write where each entry came from into `stack_sources` in the profile (step 2), so that it can be read again later
 
-**4. Read it again later.** If the user agrees, the profile gets `rescan: monthly`. Once a month, on the weekly summary day, the job reads the same places again, if it has the same read access, and adds one line to the digest: what is new or gone, for example "Next.js 16 appeared in `web-shop`, reply 'add Next.js' to watch it". It also compares the versions in the packages file with the lock files: an old version there gives alerts for bugs the user has already fixed, so say how many are out of date and "reply 'refresh packages' to update them". The job never changes the stack or the packages file by itself. A job without that access skips the rescan and says so once
+**4. Read it again later.** If the user agrees, the profile gets `rescan: monthly`. Once a month, on the weekly summary day, the job reads the same places again, if it has the same read access, and adds one line to the digest: what is new or gone, for example "Next.js 16 appeared in `web-shop`, reply 'add Next.js' to watch it". It also compares the versions in the packages file with the lock files (with `vuln_stack.py scan --diff packages.txt` when local): an old version there gives alerts for bugs the user has already fixed, so say how many are out of date and "reply 'refresh packages' to update them". The job never changes the stack or the packages file by itself. A job without that access skips the rescan and says so once
 
 ## Step 1. Ask the user
 
@@ -123,6 +123,8 @@ Ask one more question only if the answers leave a real gap. Do not ask about thi
 
 If the user gave a repository, a folder or an SBOM, or step 0 found one, read it and build the list of products and packages. Read only. Do not install or run anything from the repository
 
+When you can run Python, use `vuln_stack.py scan` (see "Helper scripts") instead of reading long lock files by hand: it parses CycloneDX/SPDX SBOMs, the common lock files and runtime files (`Dockerfile*`, `.nvmrc`, `.python-version`, `global.json`, `go.mod`, `.tool-versions`), leaves out development and obviously private packages, and works on a folder, a single file, or `--stdin --format <name>` for files read through a connector without cloning. It holds back ambiguous scopes and hosts (`@scope/*`, non-standard Go hosts) in `suspects` grouped by scope: ask the user which ones are public before re-running with `--allow-scope` or `--exclude-prefix`. Lock files it does not parse (`pnpm-lock.yaml`, `yarn.lock`, `gradle.lockfile`, `pubspec.lock`) are listed in `unsupported_files` - ask the user for an SBOM or read direct dependencies by hand
+
 | What | Where to look |
 |---|---|
 | packages and versions | lock files first: `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `packages.lock.json`, `Directory.Packages.props`, `*.csproj`, `poetry.lock`, `uv.lock`, `requirements*.txt`, `go.sum`, `Cargo.lock`, `Gemfile.lock`, `composer.lock`, `pom.xml`, `gradle.lockfile`, `pubspec.lock` |
@@ -135,7 +137,7 @@ Then show the user the list grouped by kind, with the source file for each entry
 
 Keep direct dependencies and runtimes in the profile list for matching. Put the full list of packages with versions into a separate packages file for OSV (step 2), not into the job prompt. For that file:
 
-- leave out packages used only in development and tests (`devDependencies`, test runners, linters, build tools), unless the user wants them. They are the largest source of alerts that do not matter. If you keep them, put them in a separate file and rate their items one level lower;
+- leave out packages used only in development and tests (`devDependencies`, test runners, linters, build tools), unless the user wants them. They are the largest source of alerts that do not matter. If you keep them, put them in a separate file (`--dev-out`) and rate their items one level lower;
 - leave out private and internal packages: your organization's scope (`@company/...`), private Go modules, packages from an internal registry. OSV knows nothing about them, and a query would send their names to osv.dev
 
 ## Step 2. Write the profile
@@ -297,7 +299,7 @@ Then look at `patched` for entries with `why: snoozed` whose `until` date is aft
 
 ### R2. Fetch the sources
 
-With the helper script (see "Helper script"):
+With the helper script (see "Helper scripts"):
 
 ```sh
 python3 -I vuln_feed.py fetch --sources zerowire,kev --epss --cve-details
@@ -306,7 +308,7 @@ python3 -I vuln_feed.py fetch --sources zerowire,kev,feeds,osv,ghsa,nvd \
   --feeds feeds.txt --packages packages.txt --ghsa ghsa.txt --nvd nvd.txt --epss --cve-details
 ```
 
-Zero Wire and KEV cover only a few of the most important vulnerabilities each week. A product in focus that ships regular security releases (a runtime, a framework, a web server) needs its own feed, or its releases never reach the digest. At setup, find the official security feed (RSS or Atom) of each product in focus, check it in the vendor's documentation, and list it in `feeds.txt` as `name|url`. Then run `vuln_feed.py check-feeds --feeds feeds.txt`: it reads each feed once and shows its format, entries, newest date and whether the entries name CVE ids. Drop or replace a feed it reports a problem with: an HTML page instead of a feed, no entries, or a blog whose entries name no CVE
+Zero Wire and KEV cover only a few of the most important vulnerabilities each week. A product in focus that ships regular security releases (a runtime, a framework, a web server) needs its own source, or its releases never reach the digest. At setup, start with `vuln_stack.py suggest-sources --stack <products>`: it matches the confirmed stack against `catalog.json` and proposes verified entries for `feeds.txt`, `ghsa.txt` and `nvd.txt`. For products not in the catalog, use `vuln_stack.py discover-feeds <vendor-security-page>` to find RSS, Atom or GitHub Security Advisories links, or `vuln_stack.py find-cpe <product>` to look up real NVD CPE prefixes instead of guessing. Always run `vuln_feed.py check-feeds --feeds feeds.txt` before putting feeds into the job: drop or replace a feed it reports a problem with (an HTML page instead of a feed, no entries, or a blog whose entries name no CVE)
 
 For open-source products in focus that publish GitHub Security Advisories instead of an RSS feed (such as Kubernetes, Grafana, Traefik or Envoy), list their repositories in `ghsa.txt` as `owner/repo` and turn on `ghsa`. A line `package|<ecosystem>|<name>`, such as `package|npm|next`, reads the reviewed advisories that affect that one package. OSV already includes those, so use it only without a packages file. For network, VPN or proprietary products with neither a vendor feed nor a GitHub repository (such as FortiGate, PAN-OS or ESXi), list verified CPE prefixes in `nvd.txt` as `name|cpe:2.3:...` and turn on `nvd`. Optional `GITHUB_TOKEN` and `NVD_API_KEY` environment variables raise the API limits - keep them in the platform's secret storage, never in files or command-line flags (rule 8). If a product still has no feed or API, read its security page on each run by hand and give its entries keys of the form `page:<name>:<url>`
 
@@ -489,7 +491,7 @@ The user changes the digest by answering it in plain words. Change the profile, 
 | "check CVE-YYYY-NNNN", "am I affected by <name>" | a one-off answer, nothing changes: read what the sources say about it (`fetch --all`, an OSV query for the packages file, the vendor's advisory), match it to the stack as in R3 and R4, and answer in a few lines with the source links |
 | "status" | answer in a few lines: the date of the last digest (`last_digest` in the state), the next run, the sources and which of them failed in the last digest (its line about failed sources: the state does not keep errors), what is in `ignore`, `less` and `patched`, and `paused_until` |
 | "I also use X", "I no longer use X" | change `stack` |
-| "refresh packages" | read the lock files again (step 0) and write the packages file anew. Show what changed |
+| "refresh packages" | run `vuln_stack.py scan --diff packages.txt --out packages.txt` (or read the lock files again if Python is not available) and show what was added, removed or updated |
 | "send it at 9", "only on Mondays" | change the schedule and `schedule`, say the next run time |
 | "shorter", "more detail" | change `length` |
 | "update vuln-digest" | follow the "Updates" section |
@@ -514,7 +516,7 @@ Check once a week: on the weekly summary day, or on the first run of the week if
 
 ### Apply, when the user asks
 
-1. get the new `README.md` and `vuln_feed.py` from this site, or from the plugin if the user installed vuln-digest as a Claude Code plugin and updated it. Keep them next to the old copies under other names;
+1. get the new `README.md` and `vuln_feed.py` (and `vuln_stack.py` and `catalog.json` if you keep local copies for setup or rescan) from this site, or from the plugin if the user installed vuln-digest as a Claude Code plugin and updated it. Keep them next to the old copies under other names;
 2. compare the old and the new files and show the user what changed, in their language. Name in particular: sources added or removed and the addresses they contact, new commands the job runs, any change to what leaves the user's machine (OSV queries, delivery), new questions in step 1;
 3. if you downloaded the files from this site, compare their SHA-256 with `sha256` in `version.json`. Files from the plugin can be a version behind the site: compare them only if their version is the `version` in `version.json`. If they differ, the download is incomplete or the site is half updated: stop and try again later. The checksums come from the same site, so they catch a broken download, not a forged one. Then read the whole new script before you run it, as at setup;
 4. replace the copies only after the user agrees. Keep the profile and the state, and save the state to the durable copy first. If the new version adds questions to step 1, ask them now and update the profile;
@@ -525,7 +527,7 @@ If the user declines, keep the old copies. The job will mention the new version 
 
 ### Versions
 
-`version.json` has `version`, the current version, `sha256`, the checksums of `README.md` and `vuln_feed.py` of that version, and `releases`, newest first, each with `version`, `date` and `summary`. A change of the first number means the profile or the job prompt must change too: say so to the user when you show the update
+`version.json` has `version`, the current version, `sha256`, the checksums of `README.md`, `vuln_feed.py`, `vuln_stack.py` and `catalog.json` of that version, and `releases`, newest first, each with `version`, `date` and `summary`. A change of the first number means the profile or the job prompt must change too: say so to the user when you show the update
 
 vuln-digest is also a plugin for Claude Code, in the same repository. A plugin update changes only the files the plugin uses for setup. A job set up from the plugin runs from its own copies, like any other job, and follows the same rules
 
@@ -546,9 +548,13 @@ The sources marked "on" are used unless the user says otherwise. The others are 
 
 Do not fetch more than needed: one fetch of each source per run is enough. Use the source's own API limits, and send a User-Agent that names this tool
 
-## Helper script
+## Helper scripts
 
-`vuln_feed.py` does the fetching and the deduplication of R2 and the marking of R7. It needs Python 3.9 or later and only the standard library. Download it from https://vuln-digest.secmy.app/vuln_feed.py, read it before you run it, as you would any script from the internet, and keep the copy next to the state (step 6). Run it with `python3 -I`
+The project ships two small Python 3.9+ scripts that use only the standard library. Read each script before you run it, as you would any script from the internet, and run both with `python3 -I`
+
+### `vuln_feed.py` (every scheduled run)
+
+`vuln_feed.py` does the fetching and the deduplication of R2 and the marking of R7. Download it from https://vuln-digest.secmy.app/vuln_feed.py and keep the copy next to the state (step 6)
 
 | Command | What it does |
 |---|---|
@@ -576,3 +582,17 @@ New sources: the state remembers which sources were read in full. A source read 
 Feeds can be RSS 2.0, RSS 1.0 (RDF) or Atom. OSV results list every package from the packages file that an advisory affects (`packages`), the fixed versions of those packages only, and CVSS vectors (`cvss`). An advisory that did not change since it was delivered is not downloaded again. GHSA reads published repository security advisories and the reviewed advisories of single packages. NVD reads the CVEs published for each CPE in the window and skips rejected CVEs. A cut-off NVD answer is reported as partial and its product stays pending
 
 If a source fails, the script reports it in `errors` and goes on with the others. A response larger than 32 MB is refused
+
+### `vuln_stack.py` and `catalog.json` (setup and rescan only)
+
+`vuln_stack.py` helps in step 0, step 1 and `refresh packages`. The scheduled job does not need it unless it rescans local lock files. Download it from https://vuln-digest.secmy.app/vuln_stack.py alongside https://vuln-digest.secmy.app/catalog.json
+
+| Command | What it does |
+|---|---|
+| `scan <path> [--out packages.txt]` | reads CycloneDX/SPDX SBOMs, common lock files (`package-lock.json`, `composer.lock`, `go.mod`/`go.sum`, `requirements*.txt`, `Cargo.lock`, `poetry.lock`, `uv.lock`, `Gemfile.lock`, `packages.lock.json`, `Pipfile.lock`, `pom.xml`, `*.csproj`) and runtime files (`Dockerfile*`, `.nvmrc`, `.python-version`, `global.json`, `.tool-versions`). Leaves out dev and private packages; holds back ambiguous scopes (`@scope/*`, custom Go hosts) in `suspects` until approved |
+| `scan --stdin --format <name>` | parses one file passed on stdin, for repositories read via a connector without cloning |
+| `--dev-out FILE`, `--diff FILE` | writes excluded dev packages separately; compares the scan with an existing `packages.txt` and reports `added`, `removed`, `updated` |
+| `--allow-scope S`, `--exclude-prefix P` | approves a public scope or Go host from `suspects`, or excludes a private prefix (repeatable) |
+| `suggest-sources --stack a,b,c` | matches confirmed products against `catalog.json` and outputs verified `feeds`, `ghsa` and `nvd` candidates plus `unmatched` |
+| `discover-feeds <url>` | reads a vendor security page (http/https only) and lists RSS, Atom and GitHub Security Advisories links found on it |
+| `find-cpe <query>` | queries the NVD CPE 2.0 API (optional `NVD_API_KEY` env var) and returns grouped `cpe:2.3` prefixes |
