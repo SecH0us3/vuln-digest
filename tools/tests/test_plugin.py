@@ -5,6 +5,7 @@ plugin manifest, skills/ holds one skill that points at README.md. These tests k
 the plugin small (no code that runs by itself) and the version the same everywhere.
 """
 
+import hashlib
 import json
 import re
 import unittest
@@ -93,6 +94,12 @@ class PluginTest(unittest.TestCase):
 
 
 class VersionTest(unittest.TestCase):
+    def test_checksums_in_version_json(self):
+        sums = load("site/version.json")["sha256"]
+        for name, path in (("README.md", "README.md"), ("vuln_feed.py", "tools/vuln_feed.py")):
+            digest = hashlib.sha256((ROOT / path).read_bytes()).hexdigest()
+            self.assertEqual(sums[name], digest, f"update sha256 of {name} in site/version.json: sha256sum {path}")
+
     def test_same_version_everywhere(self):
         plugin = load(".claude-plugin/plugin.json")["version"]
         site = load("site/version.json")

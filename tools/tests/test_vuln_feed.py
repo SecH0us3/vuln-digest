@@ -381,6 +381,22 @@ class VulnFeedTest(unittest.TestCase):
         self.assertEqual(out["errors"], [])
         self.assertEqual(len(out["items"]), 1)
 
+    def test_check_feeds(self):
+        feeds = self.feeds_file(node=NODE_RSS, debian=DEBIAN_RDF, blog="<!DOCTYPE html><html><body>Blog</body></html>",
+                                news="<rss><channel><item><title>We raised a round</title>"
+                                     "<pubDate>Wed, 11 Nov 2026 00:00:00 GMT</pubDate></item></channel></rss>")
+        with open(feeds, "a") as f:
+            f.write(f"gone|{self.server.url}/gone.xml\n")
+        rows = {r["name"]: r for r in json.loads(self.run_tool("check-feeds", "--feeds", feeds).stdout)}
+        self.assertTrue(rows["node"]["ok"])
+        self.assertEqual((rows["debian"]["format"], rows["debian"]["entries"], rows["debian"]["newest"]),
+                         ("RSS 1.0", 2, "2026-11-20"))
+        self.assertFalse(rows["blog"]["ok"])
+        self.assertIn("HTML page", rows["blog"]["problems"][0])
+        self.assertIn("no entry names a CVE", rows["news"]["problems"][0])
+        self.assertIn("404", rows["gone"]["problems"][0])
+        self.assertFalse(os.path.exists(self.state))
+
     # ---------- OSV ----------
 
     def osv_server(self, vulns, batch):

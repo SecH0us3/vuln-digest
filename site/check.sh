@@ -51,6 +51,7 @@ lines="$(wc -l < tools/vuln_feed.py)"
 [ "$lines" -ge 620 ] && [ "$lines" -le 800 ] || fail "vuln_feed.py has $lines lines: update the landing page text"
 
 # --- The instructions page ---
+grep -qF '<nav class="site-header"' "$DOCS" || fail 'the instructions page has no header with a link to the landing page'
 grep -qF 'href="https://github.com/SecH0us3/vuln-digest"' "$DOCS" || fail 'no repository link on the instructions page'
 grep -qF 'ecosystem|name|version' "$DOCS" || fail 'package line format lost'
 [ "$(grep -c '<h1' "$DOCS")" = 1 ] || fail 'the instructions page must have exactly one h1'
@@ -77,6 +78,11 @@ cmp -s README.md _site/index.md || fail 'index.md differs from README.md'
 cmp -s README.md _site/llms-full.txt || fail 'llms-full.txt differs from README.md'
 cmp -s AGENTS.md _site/AGENTS.md || fail 'AGENTS.md copy differs'
 cmp -s tools/vuln_feed.py _site/vuln_feed.py || fail 'vuln_feed.py copy differs'
+# version.json holds the checksums of the published README.md and vuln_feed.py
+for f in README.md vuln_feed.py; do
+  sum="$(sha256sum "_site/$f" | cut -d' ' -f1)"
+  grep -qF "\"$f\": \"$sum\"" _site/version.json || fail "the sha256 of $f in version.json is out of date"
+done
 cmp -s site/version.json _site/version.json || fail 'version.json copy differs'
 
 # Running jobs compare the Version line of their copy of README.md with version.json

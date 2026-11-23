@@ -17,7 +17,7 @@ If you were asked to set up a vulnerability digest for a user, this file is not 
 - `site/landing.html`, `site/landing.css` - the landing page for people at `/`, set as a case file on a desk. Hand-written, no external scripts or fonts
 - `site/fonts/` - Archivo, Special Elite and IBM Plex Mono (latin subset, woff2), served from the site so that no page loads anything from a third party. Archivo and IBM Plex Mono are under the SIL Open Font License, Special Elite under the Apache License 2.0; the license files sit next to the fonts and are published with them
 - `site/404.html` - the page for unknown addresses
-- `site/style.css`, `site/footer.html`, `site/toc.lua` - the look of the instructions page at `/docs/`, its footer, and a filter that puts the title above the table of contents
+- `site/style.css`, `site/header.html`, `site/footer.html`, `site/toc.lua` - the look of the instructions page at `/docs/`, its header with links back to the landing page, its footer, and a filter that puts the title above the table of contents
 - Links between pages are relative, so the site works on its own domain and under a path such as `/vuln-digest/` on github.io. Only `site/404.html` uses absolute paths: the build prefixes them with `BASE_PATH`, set in the workflow
 - `site/head.html` - description, canonical address, icons and social preview tags for the instructions page. Paths in it start with `../`, because the page lives at `/docs/`
 - `site/assets/` - the icon and the social preview image. Each PNG is rendered from the SVG next to it
@@ -78,6 +78,7 @@ The version is written in three places and must be the same: the `Version` line 
 
 - raise the version when a change to `README.md` or `tools/vuln_feed.py` should reach users who saved a copy: a new source, a fix in the run steps, a new option. Typos and changes to the site alone need no new version
 - the first number: the profile or the job prompt must change. The second: new behaviour that works with the old profile. The third: fixes
+- update `sha256` in `site/version.json` whenever `README.md` or `tools/vuln_feed.py` changes, even without a new version: `sha256sum README.md tools/vuln_feed.py`. The tests and `site/check.sh` fail otherwise
 - add a release at the top of `releases` in `site/version.json`: `version`, `date`, and a `summary` of one sentence that names new sources, new addresses the job contacts and new commands. Users see that summary in their digest
 - Claude Code users get a plugin update only when `version` in `plugin.json` changes. Do not set `version` in `marketplace.json`
 - the plugin holds one skill and the files it points at. Do not add hooks, MCP or LSP servers, agents, commands, `bin/` or `settings.json` at the repository root: they would become part of the plugin and could run without the user asking. The tests fail if any of them appears

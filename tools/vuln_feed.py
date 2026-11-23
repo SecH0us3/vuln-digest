@@ -37,6 +37,9 @@ Usage:
   python3 -I vuln_feed.py history [--days 28]
       items delivered in the last N days, newest first: for the weekly summary
       and for "I patched X" feedback
+  python3 -I vuln_feed.py check-feeds --feeds FILE
+      read each feed once and say whether it works: its format, entries, newest
+      date and CVE ids. For the setup, before a feed goes into the job
 
 Files (next to this script unless set): state.json, last_run.json
 Offline testing: --zerowire-file, --kev-file, --osv-file read local copies
@@ -257,6 +260,42 @@ def parse_vendor_feed(name, raw, warnings=None):
             "text": text[:8000],
         })
     return items
+
+
+def check_feed(name, url):
+    """One line of check-feeds. "problems" lists what makes the feed useless for a digest"""
+    row = {"name": name, "url": url, "ok": False, "problems": []}
+    try:
+        raw = http_get(url)
+    except Exception as e:
+        row["problems"].append(f"{type(e).__name__}: {e}")  # an HTTP error names its status
+        return row
+    head = raw[:500].decode("utf-8", "replace").lstrip().lower()
+    if head.startswith(("<!doctype html", "<html")):
+        row["problems"].append("an HTML page, not a feed: look for the RSS or Atom link on it")
+        return row
+    try:
+        root = ET.fromstring(raw)  # noqa: S314 - safe for the same reason as in feed_entries
+        row["format"] = {"rss": "RSS 2.0", "RDF": "RSS 1.0", "feed": "Atom"}.get(lname(root), lname(root))
+    except ET.ParseError as e:
+        row["format"] = f"not well-formed XML ({e})"
+    warnings = []
+    try:
+        items = parse_vendor_feed(name, raw, warnings)
+    except ET.ParseError:
+        items = []
+    dates = sorted(i["date"] for i in items if i["date"])
+    row.update(entries=len(items), newest=dates[-1] if dates else "",
+               with_cve=sum(1 for i in items if i["cves"]), undated=len(items) - len(dates))
+    row["problems"] += warnings
+    if not items:
+        row["problems"].append("no entries")
+    elif not row["with_cve"]:
+        row["problems"].append("no entry names a CVE: is this a security feed, or a blog?")
+    if row["undated"]:
+        row["problems"].append(f"{row['undated']} entries without a readable date")
+    row["ok"] = bool(items) and not warnings
+    return row
 
 
 # ---------- CISA KEV ----------
@@ -593,7 +632,7 @@ def link_same_cves(result, state_items):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["fetch", "mark", "history"])
+    ap.add_argument("command", choices=["fetch", "mark", "history", "check-feeds"])
     ap.add_argument("--days", type=int, default=28, help="history: items shown in the last N days (default 28)")
     ap.add_argument("--sources", default="zerowire,kev")
     ap.add_argument("--packages", help="file with ecosystem|name|version lines for OSV")
@@ -632,6 +671,13 @@ def main():
         save_json(a.state, st)
         os.remove(a.snapshot)
         print(f"marked {len(snap['items'])} item(s) as delivered", file=sys.stderr)
+        return
+
+    if a.command == "check-feeds":
+        if not a.feeds:
+            raise SystemExit("check-feeds needs --feeds FILE")
+        json.dump([check_feed(n, u) for n, u in read_feeds(a.feeds)], sys.stdout, ensure_ascii=False, indent=1)
+        print()
         return
 
     if a.command == "history":
