@@ -4,6 +4,7 @@ import http.server
 import json
 import os
 import shutil
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,13 @@ def dump(obj, path):
 def write(path, text):
     with open(path, "w") as f:
         f.write(text)
+
+
+class QuickServer(http.server.ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind calls socket.getfqdn(), which can take seconds on macOS
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class Server:
@@ -59,7 +67,7 @@ class Server:
             def log_message(self, *args):
                 pass
 
-        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd = QuickServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
@@ -103,7 +111,17 @@ NO_PROXY_ENV = {k: v for k, v in os.environ.items() if "proxy" not in k.lower()}
 
 
 class VulnFeedTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = Server()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.close()
+
     def setUp(self):
+        self.server.pages.clear()
+        self.server.log.clear()
         self.dir = tempfile.mkdtemp()
         self.zw = os.path.join(self.dir, "zw.xml")
         self.kev = os.path.join(self.dir, "kev.json")
@@ -111,10 +129,8 @@ class VulnFeedTest(unittest.TestCase):
         shutil.copy(os.path.join(FIX, "kev.json"), self.kev)
         self.state = os.path.join(self.dir, "state.json")
         self.snap = os.path.join(self.dir, "last_run.json")
-        self.server = Server()
 
     def tearDown(self):
-        self.server.close()
         shutil.rmtree(self.dir)
 
     def feeds_file(self, **feeds):
@@ -312,7 +328,7 @@ class VulnFeedTest(unittest.TestCase):
         os.remove(self.kev)
         self.fetch("--since", "2026-11-01")
         self.run_tool("mark")
-        self.assertIsNone(load(self.state)["sources"]["kev"])
+        self.assertEqual(load(self.state)["sources"]["kev"], {"pending": "2026-11-01"})
         shutil.copy(os.path.join(FIX, "kev.json"), self.kev)
         out = self.fetch(today="2026-11-21")
         # dated 11-10: after the first run's --since, so it was due on the first run and comes now
@@ -394,8 +410,44 @@ class VulnFeedTest(unittest.TestCase):
         self.assertFalse(rows["blog"]["ok"])
         self.assertIn("HTML page", rows["blog"]["problems"][0])
         self.assertIn("no entry names a CVE", rows["news"]["problems"][0])
+        self.assertFalse(rows["news"]["ok"])
+        self.assertEqual(rows["debian"]["latest"], ["DSA-6002 php", "DSA-6001 nginx"])
         self.assertIn("404", rows["gone"]["problems"][0])
         self.assertFalse(os.path.exists(self.state))
+
+    def test_cves_in_full_text_and_xhtml(self):
+        feeds = self.feeds_file(
+            rss='<rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><item><title>Release</title>'
+                '<link>https://x.example/r</link><description>Short teaser</description>'
+                '<content:encoded><![CDATA[<p>Fixes CVE-2026-1111</p>]]></content:encoded></item></channel></rss>',
+            atom='<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Advisory</title><id>a1</id>'
+                 '<summary>see below</summary><content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml">'
+                 '<p>Fixes <b>CVE-2026-2222</b></p></div></content></entry></feed>',
+            notfeed="<sitemap><url>https://x.example/</url></sitemap>")
+        out = self.fetch("--all", "--sources", "feeds", "--feeds", feeds)
+        self.assertEqual(sorted(c for i in out["items"] for c in i["cves"]), ["CVE-2026-1111", "CVE-2026-2222"])
+        self.assertEqual([e["source"] for e in out["errors"]], ["feeds:notfeed"])
+        self.assertIn("not an RSS or Atom feed", out["errors"][0]["error"])
+
+    def test_truncated_prefixed_atom_entries(self):
+        feeds = self.feeds_file(a='<atom:feed xmlns:atom="http://www.w3.org/2005/Atom"><atom:entry><atom:title>One</atom:title>'
+                                  '<atom:id>1</atom:id></atom:entry><atom:entry><atom:title>cut')
+        out = self.fetch("--all", "--sources", "feeds", "--feeds", feeds)
+        self.assertEqual([i["title"] for i in out["items"]], ["One"])
+
+    def test_partial_feed_keeps_its_first_cut_off(self):
+        self.fetch("--since", "2026-01-01")
+        self.run_tool("mark")
+        cut = DEBIAN_RDF.replace("</rdf:RDF>", "<item><title>cut")
+        feeds = self.feeds_file(debian=cut)
+        self.fetch("--sources", "feeds", "--feeds", feeds, today="2026-11-21")
+        self.assertEqual(load(self.state)["sources"]["feeds:debian"], {"pending": "2026-11-19"})
+        self.fetch("--sources", "feeds", "--feeds", feeds, today="2026-11-25")  # no mark: the cut-off stays
+        self.assertEqual(load(self.state)["sources"]["feeds:debian"], {"pending": "2026-11-19"})
+        self.server.pages["/debian.xml"] = DEBIAN_RDF
+        self.fetch("--sources", "feeds", "--feeds", feeds, today="2026-11-26")
+        self.assertEqual(load(self.state)["sources"]["feeds:debian"], "2026-11-19")
+        self.assertNotIn("feeds", load(self.state)["sources"])
 
     # ---------- OSV ----------
 
@@ -418,14 +470,15 @@ class VulnFeedTest(unittest.TestCase):
         return self.fetch("--sources", "osv", "--packages", path, "--osv-api", self.server.url + "/v1/", *args, **kw)
 
     def test_osv_multi_package_advisory(self):
-        v = osv_vuln("CVE-2026-1000", affected=[affected("PyPI", "Django", "5.2.9"), affected("PyPI", "djangorestframework", "3.16.2"),
-                                                affected("Debian:12", "python-django", "3:4.2-1")])
+        v = osv_vuln("CVE-2026-1000", affected=[affected("PyPI", "Django", "5.2.9"), affected("PyPI", "django-rest-framework", "3.16.2"),
+                                                affected("PyPI", "flask", "9.9"), affected("Debian:12", "python-django", "3:4.2-1")])
         self.osv_server({"CVE-2026-1000": v}, [{"vulns": [{"id": "CVE-2026-1000", "modified": v["modified"]}]},
                                                {"vulns": [{"id": "CVE-2026-1000", "modified": v["modified"]}]}])
-        out = self.osv("PyPI|django|5.2.1\nPyPI|Django_REST_framework|3.16.0\n", "--all")
+        out = self.osv("PyPI|django|5.2.1\nPyPI|Django_REST.framework|3.16.0\n", "--all")
         item = out["items"][0]
-        self.assertEqual([p["name"] for p in item["packages"]], ["django", "Django_REST_framework"])
-        self.assertEqual(item["fixed_versions"], ["5.2.9"])  # not the Debian package, not another one
+        self.assertEqual([p["name"] for p in item["packages"]], ["django", "Django_REST.framework"])
+        # PyPI names are normalized; flask and the Debian package are not the user's
+        self.assertEqual(item["fixed_versions"], ["3.16.2", "5.2.9"])
         self.assertEqual(item["cves"], ["CVE-2026-1000"])
         self.assertTrue(item["cvss"][0].startswith("CVSS:3.1/"))
 
@@ -442,6 +495,7 @@ class VulnFeedTest(unittest.TestCase):
         out = self.osv("npm|next|\n", "--since", "2026-11-01")
         self.assertEqual(set(self.keys(out)), {"osv:GHSA-aaaa", "osv:GHSA-bbbb"})
         self.assertEqual([(e["source"], e.get("partial")) for e in out["errors"]], [("osv", True)])
+        self.assertEqual(load(self.state)["sources"]["osv"], "2026-11-01")  # one bad advisory does not keep osv pending
         self.run_tool("mark")
         self.server.log.clear()
         self.assertEqual(self.osv("npm|next|\n", today="2026-11-21")["items"], [])

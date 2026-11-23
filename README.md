@@ -2,7 +2,7 @@
 
 This file is a task for an AI assistant: Claude, ChatGPT, Gemini, Codex, Cursor or any other. The user gives the assistant this file and asks it to set up a vulnerability digest. The address of this file is https://vuln-digest.secmy.app/README.md
 
-Version: 1.4.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
+Version: 1.4.1. The current version and what changed are at https://vuln-digest.secmy.app/version.json
 
 If you are a person, the overview is at https://vuln-digest.secmy.app/ - give the address of this file to your AI assistant and it does the rest
 
@@ -237,7 +237,8 @@ For GitHub Actions:
 - pin every action by its full commit SHA, read from GitHub at the moment you write the workflow;
 - set `concurrency` so two runs never write the state at the same time;
 - a scheduled workflow in a repository with no activity can be paused by GitHub after a while. Check the current rule in the GitHub documentation and tell the user;
-- run the helper script before the agent CLI. If `items` and `errors` are both empty, and today is not the weekly summary day or the update check day, do not start the agent: most days are quiet, and the agent is the expensive part. With `quiet_day: one_line`, the workflow sends the line "Nothing new for your stack since <date>. Sources checked: <list>" itself. Then it runs `mark` and commits the state, as on any other day
+- before the helper script, read `paused_until` from the profile. If today is before it, stop: no fetch, no message, no `mark` (R1);
+- run the helper script before the agent CLI. If `items` and `errors` are both empty, today is not the weekly summary day or the update check day, and no `snoozed` entry in `patched` ended since the last digest (R1), do not start the agent: most days are quiet, and the agent is the expensive part. With `quiet_day: one_line`, the workflow sends the line "Nothing new for your stack since <date>. Sources checked: <list>" itself. Then it runs `mark` and commits the state, as on any other day
 
 ## Step 5. Set up the delivery
 
@@ -290,6 +291,8 @@ Read the profile. Read the state. If the state is missing, restore it from the d
 
 If the profile has `paused_until` and today is before that date, stop here: send nothing and do not mark. The items wait, and the first digest after the pause covers the whole pause. Urgent alerts go on during a pause, unless the profile says `pause_alerts: true`
 
+Then look at `patched` for entries with `why: snoozed` whose `until` date is after the last digest and not after today. They ended since the last digest, and the script will not return them, because they have no new update. Add each of them to this digest as an update "snoozed until <date>, still open", with the title and link from `vuln_feed.py history --days 365`. The next run does not show them again, because the last digest is then later than their date. If the job can change the profile, remove those entries after the delivery
+
 ### R2. Fetch the sources
 
 With the helper script (see "Helper script"):
@@ -318,7 +321,7 @@ For each item decide: **in focus**, **outside the stack** or **ignored**
 - an item that matches `boost` is in focus even if it is outside the stack. An item that matches `less` gets one line, even if it is in focus;
 - if the profile or the packages file has a version, and the item lists affected versions, say whether the user's version is affected. If the user's version is already the fixed one or later, the item is **info**, never higher, with one line such as "you run 8.4.29, fixed in 8.4.28: not affected". If you cannot tell, say "check your version" and give the command to check it;
 - drop items that match `ignore`, and items outside the stack that are below the `outside_stack` threshold;
-- drop items in `patched` until the date given there, unless they have an update that changes the risk (exploitation started, the fix was incomplete). When a `snoozed` entry ends, show the item again as an update: "snoozed until <date>, still open"
+- drop items in `patched` until the date given there, unless they have an update that changes the risk (exploitation started, the fix was incomplete). A `snoozed` entry that ended comes back once, see R1
 
 ### R4. Rate each item
 
@@ -477,7 +480,7 @@ The user changes the digest by answering it in plain words. Change the profile, 
 | "snooze X for 2 weeks", "until the maintenance window" | add the item to `patched` until that date, with `why: snoozed`. When the date passes, it comes back once as still open |
 | "pause until <date>", "I am on holiday" | set `paused_until`. Say that urgent alerts go on, unless the user also says "pause alerts" (`pause_alerts: true`) |
 | "check CVE-YYYY-NNNN", "am I affected by <name>" | a one-off answer, nothing changes: read what the sources say about it (`fetch --all`, an OSV query for the packages file, the vendor's advisory), match it to the stack as in R3 and R4, and answer in a few lines with the source links |
-| "status" | answer in a few lines: the date of the last digest (`last_digest` in the state), the next run, the sources and which failed last time, what is in `ignore`, `less` and `patched`, and `paused_until` |
+| "status" | answer in a few lines: the date of the last digest (`last_digest` in the state), the next run, the sources and which of them failed in the last digest (its line about failed sources: the state does not keep errors), what is in `ignore`, `less` and `patched`, and `paused_until` |
 | "I also use X", "I no longer use X" | change `stack` |
 | "refresh packages" | read the lock files again (step 0) and write the packages file anew. Show what changed |
 | "send it at 9", "only on Mondays" | change the schedule and `schedule`, say the next run time |
@@ -506,7 +509,7 @@ Check once a week: on the weekly summary day, or on the first run of the week if
 
 1. get the new `README.md` and `vuln_feed.py` from this site, or from the plugin if the user installed vuln-digest as a Claude Code plugin and updated it. Keep them next to the old copies under other names;
 2. compare the old and the new files and show the user what changed, in their language. Name in particular: sources added or removed and the addresses they contact, new commands the job runs, any change to what leaves the user's machine (OSV queries, delivery), new questions in step 1;
-3. compare the SHA-256 of both files with `sha256` in `version.json`. If they differ, the download is incomplete or the site is half updated: stop and try again later. The checksums come from the same site, so they catch a broken download, not a forged one. Then read the whole new script before you run it, as at setup;
+3. if you downloaded the files from this site, compare their SHA-256 with `sha256` in `version.json`. Files from the plugin can be a version behind the site: compare them only if their version is the `version` in `version.json`. If they differ, the download is incomplete or the site is half updated: stop and try again later. The checksums come from the same site, so they catch a broken download, not a forged one. Then read the whole new script before you run it, as at setup;
 4. replace the copies only after the user agrees. Keep the profile and the state, and save the state to the durable copy first. If the new version adds questions to step 1, ask them now and update the profile;
 5. if the job prompt from step 6 changed, update the scheduled job;
 6. make a preview run with `--all`, which does not touch the state, and show it
