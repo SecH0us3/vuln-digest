@@ -802,5 +802,135 @@ class VulnFeedTest(unittest.TestCase):
         self.assertEqual(len(cve_gets), 1)
 
 
+    # ---------- 1.7.0: mark without delete, --strict, redirects, match, alert-prefilter ----------
+
+    def test_mark_keep_snapshot_is_idempotent(self):
+        self.fetch("--since", "2026-01-01")
+        self.run_tool("mark", "--keep-snapshot")
+        self.assertEqual(load(self.snap)["marked"], "2026-11-20")
+        with open(self.state) as f:
+            before = f.read()
+        p = self.run_tool("mark", "--keep-snapshot", today="2026-11-21")
+        self.assertIn("already marked", p.stderr)
+        with open(self.state) as f:
+            self.assertEqual(f.read(), before)  # a second mark changes nothing
+        self.assertEqual(self.fetch()["items"], [])
+
+    def test_mark_in_a_folder_that_forbids_deleting(self):
+        import argparse
+        import importlib.util
+        import unittest.mock
+        spec = importlib.util.spec_from_file_location("vuln_feed_t", SCRIPT)
+        vf = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vf)
+        self.fetch("--since", "2026-01-01")
+        a = argparse.Namespace(state=self.state, snapshot=self.snap, keep_snapshot=False)
+        import contextlib
+        import io
+        err = io.StringIO()
+        with unittest.mock.patch.object(vf.os, "remove", side_effect=PermissionError("Operation not permitted")), \
+                contextlib.redirect_stderr(err):
+            vf.cmd_mark(a, "2026-11-20")  # no exception: the state is saved, the snapshot is kept as marked
+        self.assertIn("kept it", err.getvalue())
+        self.assertEqual(load(self.state)["last_digest"], "2026-11-20")
+        self.assertEqual(load(self.snap)["marked"], "2026-11-20")
+        self.assertEqual(self.run_tool("mark").returncode, 0)
+
+    def test_strict_exit_code(self):
+        os.remove(self.kev)
+        p = self.run_tool("fetch", "--since", "2026-01-01", "--strict", ok=False)
+        self.assertEqual(p.returncode, 3, p.stderr)
+        out = json.loads(p.stdout)  # the output and the snapshot are written all the same
+        self.assertEqual([e["source"] for e in out["errors"]], ["kev"])
+        self.assertTrue(os.path.exists(self.snap))
+        self.assertEqual(self.run_tool("fetch").returncode, 0)  # without --strict: 0
+
+    def test_check_feeds_shows_redirects(self):
+        feeds = self.feeds_file(node=NODE_RSS)
+        self.server.pages["/old.xml"] = (301, self.server.url + "/node.xml")
+        self.server.pages["/moved-away.xml"] = (302, "http://localhost:9/feed.xml")
+        with open(feeds, "a") as f:
+            f.write(f"moved|{self.server.url}/old.xml\nblocked|{self.server.url}/moved-away.xml\n")
+        rows = {r["name"]: r for r in json.loads(self.run_tool("check-feeds", "--feeds", feeds).stdout)}
+        self.assertTrue(rows["moved"]["ok"])
+        self.assertEqual(rows["moved"]["final_url"], self.server.url + "/node.xml")
+        self.assertIn("moved", rows["moved"]["note"])
+        self.assertFalse(rows["blocked"]["ok"])
+        self.assertEqual(rows["blocked"]["hosts"], ["127.0.0.1", "localhost"])
+        self.assertIn("the failed request went to localhost", rows["blocked"]["problems"][0])
+        self.assertNotIn("redirects", rows["node"])
+
+    def write_profile(self, text, name="profile.yaml"):
+        path = os.path.join(self.dir, name)
+        write(path, text)
+        return path
+
+    def test_profile_example_in_readme_parses(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("vuln_feed_t", SCRIPT)
+        vf = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vf)
+        with open(os.path.join(HERE, "..", "..", "README.md")) as f:
+            readme = f.read()
+        example = readme.split("# vuln-digest profile", 1)[1].split("```", 1)[0]
+        prof = vf.load_profile(self.write_profile(example))
+        self.assertEqual(prof["stack"][0], {"name": "nginx", "aliases": ["ingress-nginx", "NGINX Plus"], "exposed": True})
+        self.assertEqual(prof["weekly_summary"]["day"], "monday")
+        self.assertEqual(prof["schedule"], "weekdays 08:00")
+        self.assertIsNone(prof["paused_until"])
+        self.assertEqual(prof["stack_sources"][0]["repos"], ["acme/web-shop", "acme/infra"])
+        block = vf.load_profile(self.write_profile(
+            "stack:\n- name: Next.js\n  aliases:\n    - next\n  exposed: true\n- nginx\n"
+            "boost: [ Linux kernel,\n  OpenSSL ]  # two lines\nurl: 'https://e.org/#x'\n"))
+        self.assertEqual(block, {"stack": [{"name": "Next.js", "aliases": ["next"], "exposed": True}, "nginx"],
+                                 "boost": ["Linux kernel", "OpenSSL"], "url": "https://e.org/#x"})
+        self.assertEqual(vf.load_profile(self.write_profile('{"stack": ["nginx"]}', "p.json")), {"stack": ["nginx"]})
+        with self.assertRaises(SystemExit):
+            vf.load_profile(self.write_profile("notes: |\n  text\n"))
+
+    def test_match(self):
+        self.fetch("--since", "2026-01-01")
+        prof = self.write_profile(
+            "stack:\n  - { name: nginx, exposed: true }\n  - { name: Next.js, aliases: [next] }\n"
+            "  - Cloudflare\n  - { name: Java, aliases: [OpenJDK] }\n"
+            "ignore: [PHP]\npatched:\n  - { item: 'zerowire:java4shell', until: 2026-12-01, why: patched }\n")
+        out = json.loads(self.run_tool("match", "--profile", prof).stdout)
+        v = {m["key"]: m["verdict"] for m in out["items"]}
+        self.assertEqual(v, {"zerowire:nginx2root": "focus", "zerowire:java4shell": "patched",
+                             "kev:CVE-2026-109618": "ignored", "zerowire:old": "outside"})
+        nginx = [m for m in out["items"] if m["key"] == "zerowire:nginx2root"][0]
+        self.assertTrue(nginx["exposed"])
+        self.assertTrue(any("'next'" in w for w in out["warnings"]))
+        self.assertTrue(any("'Cloudflare' publishes the zerowire source" in w for w in out["warnings"]))
+        # after the patched date the item is matched again
+        out = json.loads(self.run_tool("match", "--profile", prof, today="2026-12-02").stdout)
+        self.assertEqual({m["key"]: m["verdict"] for m in out["items"]}["zerowire:java4shell"], "focus")
+
+    def test_alert_prefilter(self):
+        pending = os.path.join(self.dir, "pending.json")
+        quiet = self.write_profile("stack: [nginx]\n")  # nginx2root has no sign of exploitation
+        p = self.run_tool("alert-prefilter", "--profile", quiet, "--pending", pending, "--since", "2026-01-01")
+        self.assertEqual(json.loads(p.stdout)["candidates"], 0)
+        self.assertEqual(load(pending)["candidates"], [])
+        self.assertEqual(load(self.state)["last_digest"], "2026-11-20")  # marked without the agent
+        self.assertFalse(os.path.exists(self.snap))
+        # the KEV entry for PHP is exploited and in focus: the agent is needed, nothing is marked
+        os.remove(self.state)
+        hot = self.write_profile("stack: [PHP]\n")
+        p = self.run_tool("alert-prefilter", "--profile", hot, "--pending", pending, "--since", "2026-01-01", ok=False)
+        self.assertEqual(p.returncode, 10, p.stderr)
+        cands = load(pending)["candidates"]
+        self.assertEqual([c["key"] for c in cands], ["kev:CVE-2026-109618"])
+        self.assertEqual(cands[0]["match"]["verdict"], "focus")
+        self.assertTrue(os.path.exists(self.snap))
+        self.assertIsNone(load(self.state)["last_digest"])
+        self.run_tool("mark")  # the agent sent the alert and marked
+        p = self.run_tool("alert-prefilter", "--profile", hot, "--pending", pending)
+        self.assertEqual(json.loads(p.stdout)["items"], 0)
+        # a pause with pause_alerts: no fetch at all
+        paused = self.write_profile("stack: [PHP]\npaused_until: 2026-12-01\npause_alerts: true\n")
+        p = self.run_tool("alert-prefilter", "--profile", paused, "--pending", pending)
+        self.assertEqual(load(pending)["paused_until"], "2026-12-01")
+
 if __name__ == "__main__":
     unittest.main()

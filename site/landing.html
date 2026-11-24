@@ -199,7 +199,7 @@
         <div class="col-item"><h3>Reports, never changes</h3><p>The instructions forbid the assistant to patch or reconfigure anything. It tells you what to do, you decide.</p></div>
         <div class="col-item"><h3>Facts with sources</h3><p>Every CVE, version and "exploited" status comes from a source and links to it. Unknown stays "unknown".</p></div>
         <div class="col-item"><h3>Feeds are data</h3><p>Advisories are written by other people. The assistant is told never to follow instructions found in them.</p></div>
-        <div class="col-item"><h3>Scripts you can read</h3><p><a href="vuln_feed.py">vuln_feed.py</a> (~1,100 lines) fetches and deduplicates; <a href="vuln_stack.py">vuln_stack.py</a> (~900 lines) scans lock files and SBOMs at setup. Python standard library only, tested offline.</p></div>
+        <div class="col-item"><h3>Scripts you can read</h3><p><a href="vuln_feed.py">vuln_feed.py</a> (~1,600 lines) fetches, deduplicates and pre-filters urgent alerts; <a href="vuln_stack.py">vuln_stack.py</a> (~900 lines) scans lock files and SBOMs at setup. Python standard library only, tested offline.</p></div>
         <div class="col-item"><h3>Says when it breaks</h3><p>A source that did not answer is named in the digest. A lost state is rebuilt from the last date, not resent.</p></div>
     </div>
   </div>

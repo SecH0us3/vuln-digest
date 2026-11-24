@@ -1,5 +1,5 @@
 {
-  "version": "1.6.1",
+  "version": "1.7.0",
   "entries": [
     {
       "id": "ubuntu",
@@ -180,6 +180,15 @@
       "kind": "platform",
       "sources": [
         {"type": "feed", "name": "kubernetes", "url": "https://kubernetes.io/docs/reference/issues-security/official-cve-feed/feed.xml"}
+      ]
+    },
+    {
+      "id": "gke",
+      "name": "Google Kubernetes Engine",
+      "aliases": ["gke", "google kubernetes engine"],
+      "kind": "platform",
+      "sources": [
+        {"type": "feed", "name": "gke", "url": "https://docs.cloud.google.com/feeds/kubernetes-engine-security-bulletins.xml"}
       ]
     },
     {

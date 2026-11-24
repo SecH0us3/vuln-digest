@@ -1,12 +1,17 @@
 {
-  "version": "1.6.1",
+  "version": "1.7.0",
   "sha256": {
-    "README.md": "f0d19d26470580a99dd4e9509ecc852187c9493e94a17ffba4d6d49fdeee2591",
-    "vuln_feed.py": "fe23cfb1b64c14faa59a0e6d3fe40fa8b238b0bb330968ac0ea1ab52fb453167",
-    "vuln_stack.py": "1a5be629694121aa427215895df9b41b26e4ad244ec13d6b7e4ed05427bca1d1",
-    "catalog.json": "725d0d622b9cf92aa8d76a556205627f86802dd013812b5c6464df123f019a58"
+    "README.md": "889a06437d613a42df465ef37fb2f56e6fc89aeda77dc32d685d1929322c5580",
+    "vuln_feed.py": "8100c5d32c75ce369a653ae08460d5d45f8c27ec42de6fd421f0cb3e7468bdd1",
+    "vuln_stack.py": "2a13461e807de2e21b60b4a3d94824677441cee95c147d633b7fb4bcfc1606e5",
+    "catalog.json": "93f2df0bd0be9fcedeb618b3050d8d3ed634e6eea29fd6b36453d108589b84d0"
   },
   "releases": [
+    {
+      "version": "1.7.0",
+      "date": "2026-11-24",
+      "summary": "New commands match (profile matching without PyYAML) and alert-prefilter (alert runs start the agent only for candidates), --strict exit code, mark works where files cannot be deleted, check-feeds shows redirects and hosts, a host table, and a GKE feed (docs.cloud.google.com) in the catalog"
+    },
     {
       "version": "1.6.1",
       "date": "2026-11-23",
