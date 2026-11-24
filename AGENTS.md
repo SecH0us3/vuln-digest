@@ -8,7 +8,7 @@ If you were asked to set up a vulnerability digest for a user, this file is not 
 
 - `README.md` - the document. It is the only source of the published text
 - `tools/vuln_feed.py` - the runtime helper script that scheduled jobs download and run. Python standard library only
-- `tools/vuln_stack.py` - the setup and rescan helper script (lock files, SBOMs, runtimes, feed discovery, NVD CPE lookup). Python standard library only
+- `tools/vuln_stack.py` - the setup and rescan helper script (lock files, SBOMs, runtimes, feed discovery, NVD CPE lookup, files for launchd, cron and Task Scheduler). Python standard library only
 - `tools/catalog.json` - curated official feeds, GHSA repositories and NVD CPE prefixes for `vuln_stack.py suggest-sources`
 - `tools/tests/` - offline tests of both helper scripts, the catalog, the plugin and the version (`test_plugin.py`)
 - `.claude-plugin/marketplace.json`, `.claude-plugin/plugin.json`, `.claude-plugin/icon.png` - the Claude Code marketplace and plugin. The plugin is the repository root, so users install it with `/plugin marketplace add SecH0us3/vuln-digest`

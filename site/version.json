@@ -1,12 +1,17 @@
 {
-  "version": "1.7.0",
+  "version": "1.8.0",
   "sha256": {
-    "README.md": "889a06437d613a42df465ef37fb2f56e6fc89aeda77dc32d685d1929322c5580",
-    "vuln_feed.py": "8100c5d32c75ce369a653ae08460d5d45f8c27ec42de6fd421f0cb3e7468bdd1",
-    "vuln_stack.py": "2a13461e807de2e21b60b4a3d94824677441cee95c147d633b7fb4bcfc1606e5",
-    "catalog.json": "93f2df0bd0be9fcedeb618b3050d8d3ed634e6eea29fd6b36453d108589b84d0"
+    "README.md": "32fda0c4e9beba770d7aaea77ed213724e34c1e1dd6ef6e323bd2e87e98f1ee9",
+    "vuln_feed.py": "b4e7761c3c2342ef921e0076e89e531ed6a642d92fd8ee4bac23ec0e1dc58dd1",
+    "vuln_stack.py": "f81f55c3acb16f153780d4503a917668f95c6247b6208c5b92452adf46be400e",
+    "catalog.json": "55d6294c60f53c75316fe9d80701c9c39116f6279fc8c51451594ebd1b4e57bf"
   },
   "releases": [
+    {
+      "version": "1.8.0",
+      "date": "2026-11-24",
+      "summary": "New vuln_stack.py schedule (launchd, cron, Task Scheduler files; no network), alert-prefilter --reuse-if-fresh for agents on their own schedule, fetch --osv-max, profile fields tracker (read-only) and blocked_hosts, and a match warning for descriptive ignore entries"
+    },
     {
       "version": "1.7.0",
       "date": "2026-11-24",

@@ -402,6 +402,50 @@ class VulnStackTest(unittest.TestCase):
         self.assertEqual(out["prefixes"][0]["cpe"], "cpe:2.3:o:fortinet:fortios")
         self.assertEqual(out["prefixes"][0]["matches"], 2)  # deprecated excluded
 
+    def test_schedule(self):
+        d = os.path.join(self.dir, "my digest")  # a space in the path must survive quoting
+        write(os.path.join(d, "vuln_feed.py"), "import sys\nprint(sys.argv[1:])\nsys.exit(10)\n")
+        p = self.run_tool("schedule", "--kind", "launchd", "--dir", d, "--every-hours", "2", "--minute", "17",
+                          "--then", "touch agent-started", "--write", "--",
+                          "alert-prefilter", "--profile", "profile.yaml", "--pending", "alerts-pending.json")
+        plan = json.loads(p.stdout)
+        self.assertTrue(plan["python"]["ok"])
+        self.assertEqual(plan["schedule"], "every 2 h at minute 17")
+        self.assertEqual(len(plan["written"]), 2)
+        import plistlib
+        with open(os.path.join(d, "vuln-digest-alerts.plist"), "rb") as f:
+            pl = plistlib.load(f)
+        self.assertEqual(pl["ProgramArguments"], ["/bin/sh", os.path.join(d, "vuln-digest-alerts.sh")])
+        self.assertEqual([t["Hour"] for t in pl["StartCalendarInterval"]], list(range(0, 24, 2)))
+        self.assertTrue(all(t["Minute"] == 17 for t in pl["StartCalendarInterval"]))
+        self.assertTrue(plan["install"][1].startswith("launchctl bootstrap gui/$(id -u) "))
+        self.assertIn("full path of the agent CLI", " ".join(plan["notes"]))
+        # the wrapper runs the script, logs, writes the heartbeat and starts the agent on exit 10
+        r = subprocess.run(["/bin/sh", os.path.join(d, "vuln-digest-alerts.sh")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 10)
+        self.assertTrue(os.path.exists(os.path.join(d, "agent-started")))
+        self.assertTrue(os.path.exists(os.path.join(d, "vuln-digest-alerts.heartbeat")))
+        with open(os.path.join(d, "vuln-digest-alerts.log")) as f:
+            log = f.read()
+        self.assertIn("'alert-prefilter', '--profile', 'profile.yaml'", log)
+        self.assertIn("exit 10", log)
+
+        cron = json.loads(self.run_tool("schedule", "--kind", "cron", "--dir", d, "--at", "07:42", "--",
+                                        "fetch", "--sources", "zerowire,kev").stdout)
+        self.assertTrue(cron["cron_line"].startswith("42 7 * * * /bin/sh "))
+        self.assertNotIn("written", cron)
+        win = json.loads(self.run_tool("schedule", "--kind", "schtasks", "--dir", d, "--every-hours", "3",
+                                       "--minute", "5", "--", "alert-prefilter", "--profile", "p.yaml").stdout)
+        self.assertIn("/SC HOURLY /MO 3 /ST 00:05", win["install"][0])
+        self.assertIn("if %rc%==0 echo", win["files"][0]["content"])
+        for bad in (["--kind", "schtasks", "--every-hours", "2", "--", "fetch", "--feeds", "100%.txt"],
+                    ["--kind", "cron", "--every-hours", "2"],
+                    ["--kind", "cron", "--", "fetch"],
+                    ["--kind", "cron", "--every-hours", "2", "--", "rm", "-rf"]):
+            p = self.run_tool("schedule", "--dir", d, *bad, ok=False)
+            self.assertNotEqual(p.returncode, 0)
+            self.assertIn("schedule:", p.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
