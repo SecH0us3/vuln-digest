@@ -38,9 +38,9 @@
   <div class="wrap top-row">
     <a class="brand" href="./" aria-label="vuln-digest home"><img src="favicon.svg" width="22" height="22" alt=""><span>vuln-digest</span></a>
     <nav class="top-nav" aria-label="Main">
+      <a href="#example">Example</a>
       <a href="#how">How it works</a>
       <a href="#value">Why</a>
-      <a href="#example">Example</a>
       <a href="#faq">FAQ</a>
       <a href="docs/">Instructions</a>
       <a href="https://github.com/SecH0us3/vuln-digest">GitHub</a>
@@ -93,34 +93,6 @@
   </div>
 </section>
 
-<section id="how" class="block">
-  <div class="wrap">
-    <p class="section-head">How it works</p>
-    <h2>From your repositories to your inbox, in four steps</h2>
-    <ol class="flow">
-      <li><span class="num">I</span><div><h3>It looks before it asks</h3><p>If your assistant is connected to GitHub, GitLab, Confluence or Notion, it reads your lock files, Dockerfiles, Helm charts, Terraform and infrastructure pages. Read only: it does not clone, run or change anything, and keeps no code or secrets. No connector? Give it a repository, an SBOM, or just a list.</p></div></li>
-      <li><span class="num">II</span><div><h3>It asks only what it could not find</h3><p>"nginx and PHP 8.3 are in three repositories - is that production?" "Ruby is only in a two-year-old service - ignore it?" Then when to send, where, and in which language. Every question has a default.</p></div></li>
-      <li><span class="num">III</span><div><h3>It schedules itself</h3><p>A scheduled task in your assistant, or GitHub Actions or cron where there is none. A small state file makes sure nothing is sent twice. You get a test brief right away.</p></div></li>
-      <li><span class="num">IV</span><div><h3>You read, act and steer</h3><p>Exploited issues in your stack come first, with fixed versions and a command to check. Reply "hide WordPress" or "I patched nginx" and the next briefs follow. Once a month it can look at your repositories again and ask about anything new.</p></div></li>
-    </ol>
-  </div>
-</section>
-
-<section id="value" class="block">
-  <div class="wrap">
-    <p class="section-head">Why read it</p>
-    <h2>What you get</h2>
-    <div class="columns">
-      <div class="col-item"><h3>Five minutes instead of a morning of feeds</h3><p>One short brief instead of advisories, mailing lists and vendor blogs. On days with nothing new, one line.</p></div>
-      <div class="col-item"><h3>Only what you run</h3><p>Matched by meaning: ingress-nginx is nginx, GKE is Google Cloud. What you never want to see stays out.</p></div>
-      <div class="col-item"><h3>Exploited first</h3><p>CISA KEV, public exploits and EPSS decide the order. An exploited issue in your stack can come as an urgent alert, not tomorrow.</p></div>
-      <div class="col-item"><h3>A next step, not just a CVE</h3><p>The fixed version, whether yours is affected and a command to check it, taken from the source and linked.</p></div>
-      <div class="col-item"><h3>Your stack stays with you</h3><p>No service, no account. The profile and the state live where your assistant keeps them. Only public feeds are read.</p></div>
-      <div class="col-item"><h3>No lock-in</h3><p>Free and MIT licensed. Plain instructions any assistant can follow: switch assistants and take your setup with you.</p></div>
-    </div>
-  </div>
-</section>
-
 <section id="example" class="block">
   <div class="wrap">
     <p class="section-head">Exhibit A</p>
@@ -153,6 +125,34 @@
       <p class="meta">Nothing new for: .NET, Google Cloud</p>
     </article>
     <p class="note">Each item in the real digest links to its source. In-focus items get a short section: affected versions, what it is, whether it is exploited, what to do and how to check.</p>
+  </div>
+</section>
+
+<section id="how" class="block">
+  <div class="wrap">
+    <p class="section-head">How it works</p>
+    <h2>From your repositories to your inbox, in four steps</h2>
+    <ol class="flow">
+      <li><span class="num">I</span><div><h3>It looks before it asks</h3><p>If your assistant is connected to GitHub, GitLab, Confluence or Notion, it reads your lock files, Dockerfiles, Helm charts, Terraform and infrastructure pages. Read only: it does not clone, run or change anything, and keeps no code or secrets. No connector? Give it a repository, an SBOM, or just a list.</p></div></li>
+      <li><span class="num">II</span><div><h3>It asks only what it could not find</h3><p>"nginx and PHP 8.3 are in three repositories - is that production?" "Ruby is only in a two-year-old service - ignore it?" Then when to send, where, and in which language. Every question has a default.</p></div></li>
+      <li><span class="num">III</span><div><h3>It schedules itself</h3><p>A scheduled task in your assistant, or GitHub Actions or cron where there is none. A small state file makes sure nothing is sent twice. You get a test brief right away.</p></div></li>
+      <li><span class="num">IV</span><div><h3>You read, act and steer</h3><p>Exploited issues in your stack come first, with fixed versions and a command to check. Reply "hide WordPress" or "I patched nginx" and the next briefs follow. Once a month it can look at your repositories again and ask about anything new.</p></div></li>
+    </ol>
+  </div>
+</section>
+
+<section id="value" class="block">
+  <div class="wrap">
+    <p class="section-head">Why read it</p>
+    <h2>What you get</h2>
+    <div class="columns">
+      <div class="col-item"><h3>Five minutes instead of a morning of feeds</h3><p>One short brief instead of advisories, mailing lists and vendor blogs. On days with nothing new, one line.</p></div>
+      <div class="col-item"><h3>Only what you run</h3><p>Matched by meaning: ingress-nginx is nginx, GKE is Google Cloud. What you never want to see stays out.</p></div>
+      <div class="col-item"><h3>Exploited first</h3><p>CISA KEV, public exploits and EPSS decide the order. An exploited issue in your stack can come as an urgent alert, not tomorrow.</p></div>
+      <div class="col-item"><h3>A next step, not just a CVE</h3><p>The fixed version, whether yours is affected and a command to check it, taken from the source and linked.</p></div>
+      <div class="col-item"><h3>Your stack stays with you</h3><p>No service, no account. The profile and the state live where your assistant keeps them. Only public feeds are read.</p></div>
+      <div class="col-item"><h3>No lock-in</h3><p>Free and MIT licensed. Plain instructions any assistant can follow: switch assistants and take your setup with you.</p></div>
+    </div>
   </div>
 </section>
 
