@@ -932,5 +932,47 @@ class VulnFeedTest(unittest.TestCase):
         p = self.run_tool("alert-prefilter", "--profile", paused, "--pending", pending)
         self.assertEqual(load(pending)["paused_until"], "2026-12-01")
 
+    # ---------- 1.8.0: --reuse-if-fresh, --osv-max, ignore descriptions ----------
+
+    def test_alert_prefilter_reuse_if_fresh(self):
+        pending = os.path.join(self.dir, "pending.json")
+        hot = self.write_profile("stack: [PHP]\n")
+        args = ("alert-prefilter", "--profile", hot, "--pending", pending)
+        p = self.run_tool(*args, "--since", "2026-01-01", ok=False)  # the local scheduler's run
+        self.assertEqual(p.returncode, 10, p.stderr)
+        os.remove(self.kev)  # the agent's run must not fetch: a fetch would now report an error
+        p = self.run_tool(*args, "--reuse-if-fresh", "90", ok=False)
+        self.assertEqual(p.returncode, 10, p.stderr)
+        self.assertEqual(json.loads(p.stdout)["candidates"], 1)
+        self.assertEqual(len(load(pending)["candidates"]), 1)
+        self.run_tool("mark")  # the agent sent the alert
+        # a later agent run before the next prefilter run: the same alert is not sent again
+        p = self.run_tool(*args, "--reuse-if-fresh", "90")
+        out = json.loads(p.stdout)
+        self.assertEqual((out["candidates"], out["already_marked"]), (0, True))
+        # a stale pending file (the computer slept): the agent fetches itself
+        pend = load(pending)
+        pend["checked"] = "2026-01-01T00:00:00+00:00"
+        write(pending, json.dumps(pend))
+        p = self.run_tool(*args, "--reuse-if-fresh", "90", ok=False)
+        self.assertNotIn("reused", json.loads(p.stdout))
+        self.assertEqual(load(pending)["errors"][0]["source"], "kev")
+
+    def test_osv_max(self):
+        vulns = {f"GHSA-{n}": osv_vuln(f"GHSA-{n}", affected=[affected("npm", "next", "16.4.1")]) for n in "abc"}
+        self.osv_server(vulns, [{"vulns": [{"id": k, "modified": v["modified"]} for k, v in vulns.items()]}])
+        out = self.osv("npm|next|16.2.0\n", "--all", "--osv-max", "2")
+        self.assertEqual(len(out["items"]), 2)
+        self.assertEqual(out["errors"][0]["error"], "1 advisory(ies) not downloaded: --osv-max 2")
+        self.assertTrue(out["errors"][0]["partial"])
+
+    def test_match_warns_about_descriptive_ignore(self):
+        self.fetch("--since", "2026-01-01")
+        prof = self.write_profile("stack: [nginx]\nignore: [Android/iOS/ChromeOS-only Chrome releases, PHP]\n")
+        out = json.loads(self.run_tool("match", "--profile", prof).stdout)
+        self.assertTrue(any("'Android/iOS/ChromeOS-only Chrome releases' looks like a description" in w
+                            for w in out["warnings"]))
+        self.assertFalse(any("'PHP'" in w for w in out["warnings"]))
+
 if __name__ == "__main__":
     unittest.main()

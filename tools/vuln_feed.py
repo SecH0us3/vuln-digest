@@ -51,7 +51,9 @@ Usage:
   python3 -I vuln_feed.py alert-prefilter --profile FILE --state S --snapshot N --pending P [fetch options]
       the urgent-alert job without an agent: fetch, match, keep items in focus with a
       sign of exploitation. Exit 0: none, the snapshot is marked. Exit 10: candidates
-      are in the pending file, the snapshot is left for the agent to mark
+      are in the pending file, the snapshot is left for the agent to mark.
+      --reuse-if-fresh MINUTES: an agent on its own schedule takes a recent pending file
+      written by a local scheduler instead of fetching; exit 0 if its snapshot is marked
 
 Exit codes: 0 done; 3 with --strict when a source failed (the output is still
 written); 10 from alert-prefilter when the agent is needed
@@ -75,7 +77,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 ZEROWIRE_FEED = "https://radar.cloudflare.com/zero-wire/feed"
 KEV_JSON = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -482,9 +484,10 @@ def osv_get(api, vid):
     return json.loads(http_get(api + "vulns/" + urllib.parse.quote(vid, safe="")))
 
 
-def fetch_osv(packages, known, api=OSV_API, osv_file=None):
+def fetch_osv(packages, known, api=OSV_API, osv_file=None, max_get=0):
     """Returns items and errors. An advisory whose "modified" did not change since it was marked is not
-    downloaded again: it becomes a "cached" item with no updates, so only a new KEV status brings it back"""
+    downloaded again: it becomes a "cached" item with no updates, so only a new KEV status brings it back.
+    max_get > 0 downloads at most that many advisories (for a quick preview); the rest make the run partial"""
     hits, full, errors = {}, {}, []  # id -> [modified, [packages]]; id -> advisory
     if osv_file:  # offline: a JSON list of {"package": {...}, "vuln": {...}}
         with open(osv_file) as f:
@@ -519,7 +522,7 @@ def fetch_osv(packages, known, api=OSV_API, osv_file=None):
     if todo:
         errors.append({"source": "osv", "error": f"{len(todo)} package(s) have more than 10 pages of results",
                        "partial": True})
-    items = []
+    items, got, skipped = [], 0, 0
     for vid, (modified, pkgs) in hits.items():
         k = known.get(f"osv:{vid}")
         if vid not in full and k and modified and k.get("rev") == osv_rev(modified, pkgs):
@@ -527,10 +530,17 @@ def fetch_osv(packages, known, api=OSV_API, osv_file=None):
                           "link": f"https://osv.dev/vulnerability/{vid}", "date": "", "cves": k.get("cves", []),
                           "package": pkgs[0], "packages": pkgs, "updates": [], "cached": True})
             continue
+        if vid not in full and max_get and got >= max_get:
+            skipped += 1
+            continue
+        got += vid not in full
         try:
             items.append(osv_item(full.get(vid) or osv_get(api, vid), pkgs))
         except Exception as e:  # one advisory that cannot be read must not hide the others
             errors.append({"source": "osv", "error": f"{vid}: {type(e).__name__}: {e}", "partial": True})
+    if skipped:
+        errors.append({"source": "osv", "error": f"{skipped} advisory(ies) not downloaded: --osv-max {max_get}",
+                       "partial": True})
     return items, errors
 
 
@@ -1243,6 +1253,11 @@ def match_items(items, prof, base, today):
             src = [k for k, v in PUBLISHERS.items() if v == term.lower()][0]
             warnings.append(f"{term!r} publishes the {src} source and is named in nearly all of its entries: "
                             f"its matches in the text of {src} items are ignored")
+    matched = {x["term"] for m in out for x in m["matches"]}
+    for kind, label, term, extra, rx, is_noisy in compiled:
+        if kind == "ignore" and term not in matched and ("/" in term or len(term.split()) > 3):
+            warnings.append(f"ignore entry {term!r} looks like a description: match finds it only as this exact "
+                            "text. Add the short names it means as separate entries, such as a product name")
     for term, keys in weak_hits.items():
         if len(keys) >= 4 and len(keys) * 2 >= len(items):
             warnings.append(f"{term!r} is found in the text of {len(keys)} of {len(items)} items: "
@@ -1292,7 +1307,8 @@ def collect(a, known):
             elif src == "osv":
                 if not (a.packages or a.osv_file):
                     raise ValueError("osv needs --packages FILE")
-                found, errs = fetch_osv(read_packages(a.packages) if a.packages else [], known, a.osv_api, a.osv_file)
+                found, errs = fetch_osv(read_packages(a.packages) if a.packages else [], known, a.osv_api, a.osv_file,
+                                       a.osv_max)
                 items += found
                 errors += errs
             elif src == "ghsa":
@@ -1478,6 +1494,37 @@ def do_fetch(a, today):
     return out
 
 
+def reuse_pending(a, today):
+    """--reuse-if-fresh: an agent that runs on its own schedule takes the result of a prefilter run that a
+    local scheduler made shortly before, instead of fetching again. None: no fresh pending file, fetch.
+    0: nothing to do (no candidates, a pause, or the snapshot was already marked). 10: candidates wait"""
+    try:
+        with open(a.pending) as f:
+            pend = json.load(f)
+        checked = datetime.datetime.fromisoformat(pend["checked"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    age = datetime.datetime.now(datetime.timezone.utc) - checked
+    if checked.tzinfo is None or not datetime.timedelta(0) <= age <= datetime.timedelta(minutes=a.reuse_if_fresh):
+        return None
+    cands = pend.get("candidates") or []
+    try:
+        with open(a.snapshot) as f:
+            marked = bool(json.load(f).get("marked"))
+    except FileNotFoundError:
+        marked = True  # mark deletes the snapshot: the candidates were handled
+    except (OSError, ValueError):
+        return None
+    if pend.get("paused_until") and today < str(pend["paused_until"]):
+        marked, cands = True, []
+    if not marked and not cands:  # the prefilter could not mark: do it now
+        cmd_mark(a, today)
+    todo = cands if not marked else []
+    print(json.dumps({"reused": pend["checked"], "candidates": len(todo), "pending": a.pending,
+                      **({"already_marked": True} if marked and cands else {})}))
+    return 10 if todo else 0
+
+
 def cmd_prefilter(a, today):
     """The deterministic part of an urgent-alert run (R8): fetch with the alert job's state, match the
     items to the profile, keep the ones in focus (or maybe) with a sign of exploitation. None: mark the
@@ -1486,6 +1533,10 @@ def cmd_prefilter(a, today):
     "checked" time is also a heartbeat"""
     prof = load_profile(a.profile)
     now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+    if a.reuse_if_fresh:
+        code = reuse_pending(a, today)
+        if code is not None:
+            return code
     pending = {"checked": now, "date": today, "tool_version": VERSION, "state": a.state, "snapshot": a.snapshot,
                "candidates": [], "errors": [], "warnings": []}
     paused = prof.get("paused_until")
@@ -1522,6 +1573,8 @@ def main():
     ap.add_argument("--epss", action="store_true", help="add EPSS scores to the result")
     ap.add_argument("--cve-details", action="store_true", help="enrich items missing CVSS/versions via CVE.org")
     ap.add_argument("--cve-details-max", type=int, default=30, help="max CVEs to enrich via CVE.org per run (default 30)")
+    ap.add_argument("--osv-max", type=int, default=0,
+                    help="download at most N OSV advisories (0: no limit). For a quick preview with --all")
     ap.add_argument("--kev-max-age", type=int, default=30,
                     help="show KEV entries added in the last N days only (default 30)")
     ap.add_argument("--since", metavar="YYYY-MM-DD",
@@ -1537,6 +1590,9 @@ def main():
     ap.add_argument("--snapshot", default=os.path.join(HERE, "last_run.json"))
     ap.add_argument("--pending", default=os.path.join(HERE, "alerts-pending.json"),
                     help="alert-prefilter: where to write the candidates for the agent")
+    ap.add_argument("--reuse-if-fresh", type=int, default=0, metavar="MINUTES",
+                    help="alert-prefilter: if the pending file was written less than MINUTES ago, use it "
+                         "instead of fetching. Exit 0 when its snapshot is already marked")
     ap.add_argument("--zerowire-file")
     ap.add_argument("--kev-file")
     ap.add_argument("--osv-file")

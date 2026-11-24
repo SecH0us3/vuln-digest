@@ -16,18 +16,26 @@ Commands:
       find RSS/Atom feed links and GitHub Security Advisories links on a vendor security page
   python3 -I vuln_stack.py find-cpe <query> [--max 10]
       search the NVD CPE 2.0 API and return grouped cpe:2.3 prefixes (optional NVD_API_KEY env)
+  python3 -I vuln_stack.py schedule --kind launchd|cron|schtasks --dir DIR (--every-hours H | --at HH:MM)
+      [--then CMD] [--write] -- alert-prefilter --profile profile.yaml ...
+      a wrapper script and a launchd plist, cron line or Task Scheduler command that run vuln_feed.py
+      with absolute paths, plus the commands to install, run once, check and remove it. Prints them;
+      --write saves the files in DIR only. It never installs or starts anything itself
 """
 import argparse
 import html.parser
 import json
 import os
+import plistlib
 import re
+import secrets
+import shlex
 import sys
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CATALOG = os.path.join(HERE, "catalog.json")
@@ -896,6 +904,123 @@ def run_find_cpe(query, api, limit):
 
 # ---------- main ----------
 
+# ---------- schedule: files for launchd, cron or Task Scheduler ----------
+
+def schedule_plan(kind, d, args, every_hours=None, at=None, minute=None, label="vuln-digest-alerts",
+                  then=None, python=None, home=None):
+    """What to install for a scheduled vuln_feed.py run: the files and the commands. Nothing is run here.
+    The wrapper logs every run to <label>.log, writes the time of each run that ended with 0 or 10 to
+    <label>.heartbeat (R8), and with --then starts the agent on exit code 10"""
+    d = os.path.abspath(d)
+    py = python or sys.executable
+    home = home or os.path.expanduser("~")
+    if not args or args[0] not in ("fetch", "alert-prefilter", "mark", "check-feeds", "match"):
+        raise ValueError("give the vuln_feed.py command after --, for example: -- alert-prefilter --profile profile.yaml")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", label):
+        raise ValueError("--label: letters, digits, '.', '_' and '-' only")
+    if any("\n" in x or "\r" in x for x in [d, py, then or "", *args]):
+        raise ValueError("no line breaks in paths, arguments or --then")
+    if (every_hours is None) == (at is None):
+        raise ValueError("give --every-hours H or --at HH:MM")
+    if every_hours is not None and not 1 <= every_hours <= 12:
+        raise ValueError("--every-hours: 1 to 12")
+    hour, minute = (None, minute) if at is None else map(int, at.split(":"))
+    minute = secrets.randbelow(60) if minute is None else minute
+    if not 0 <= minute <= 59 or (hour is not None and not 0 <= hour <= 23):
+        raise ValueError("the time is out of range")
+    log, beat = os.path.join(d, f"{label}.log"), os.path.join(d, f"{label}.heartbeat")
+    feed = os.path.join(d, "vuln_feed.py")
+    plan = {"kind": kind, "dir": d, "python": {"path": py}, "files": [], "notes": [],
+            "schedule": f"every {every_hours} h at minute {minute}" if hour is None else f"daily at {hour:02d}:{minute:02d}"}
+    if os.path.abspath(py) == os.path.abspath(sys.executable):
+        v = sys.version_info
+        plan["python"].update(version=f"{v[0]}.{v[1]}.{v[2]}", ok=v >= (3, 9))
+    else:
+        plan["python"]["check"] = f"{py} --version (3.9 or later)"
+    if not os.path.exists(feed):
+        plan["notes"].append(f"{feed} does not exist yet: put vuln_feed.py in that folder first")
+
+    if kind == "schtasks":
+        if any('"' in x or "%" in x for x in [d, py, then or "", *args]):
+            raise ValueError('Task Scheduler: no " or % in paths, arguments or --then')
+        wrapper = os.path.join(d, f"{label}.cmd")
+        q = " ".join(f'"{x}"' for x in args)
+        lines = ["@echo off", f'cd /d "{d}"', f'"{py}" -I "{feed}" {q} >> "{log}" 2>&1', "set rc=%ERRORLEVEL%",
+                 f'if %rc%==0 echo %DATE% %TIME%> "{beat}"', f'if %rc%==10 echo %DATE% %TIME%> "{beat}"']
+        if then:
+            lines.append(f'if %rc%==10 {then} >> "{log}" 2>&1')
+        plan["files"].append({"path": wrapper, "content": "\r\n".join(lines + ["exit /b %rc%"]) + "\r\n"})
+        when = (f"/SC HOURLY /MO {every_hours} /ST 00:{minute:02d}" if hour is None
+                else f"/SC DAILY /ST {hour:02d}:{minute:02d}")
+        plan["install"] = [f'schtasks /Create /TN "{label}" {when} /TR "\\"{wrapper}\\"" /F']
+        plan["run_now"] = [f'schtasks /Run /TN "{label}"']
+        plan["check"] = [f'schtasks /Query /TN "{label}" /V /FO LIST', f'type "{log}"']
+        plan["remove"] = [f'schtasks /Delete /TN "{label}" /F']
+        plan["notes"].append("the task runs only while the user is logged on, unless it is created with a password")
+        return plan
+
+    wrapper = os.path.join(d, f"{label}.sh")
+    lines = ["#!/bin/sh", "# vuln-digest scheduled run, written by vuln_stack.py schedule",
+             f"exec >> {shlex.quote(log)} 2>&1", f"cd {shlex.quote(d)} || exit 1",
+             'echo "--- $(date -u +%Y-%m-%dT%H:%M:%SZ)"',
+             " ".join(shlex.quote(x) for x in [py, "-I", feed, *args]), "rc=$?", 'echo "exit $rc"',
+             f'if [ $rc -eq 0 ] || [ $rc -eq 10 ]; then date -u +%Y-%m-%dT%H:%M:%SZ > {shlex.quote(beat)}; fi']
+    if then:
+        lines.append(f"if [ $rc -eq 10 ]; then {then}; fi")
+    plan["files"].append({"path": wrapper, "content": "\n".join(lines + ["exit $rc"]) + "\n", "mode": "755"})
+    run = f"/bin/sh {shlex.quote(wrapper)}"
+    if then and not os.path.isabs(shlex.split(then)[0]):
+        plan["notes"].append("cron and launchd start jobs with a short PATH: give --then with the full path of the agent CLI")
+
+    if kind == "cron":
+        line = (f"{minute} */{every_hours} * * * " if hour is None else f"{minute} {hour} * * * ") + run
+        plan["cron_line"] = line
+        plan["install"] = [f"( crontab -l 2>/dev/null; echo {shlex.quote(line)} ) | crontab -"]
+        plan["run_now"] = [run]
+        plan["check"] = ["crontab -l", f"tail -n 20 {shlex.quote(log)}"]
+        plan["remove"] = [f"crontab -l | grep -vF {shlex.quote(wrapper)} | crontab -"]
+        plan["notes"].append("cron uses the computer's time zone, and skips runs while the computer is off or asleep")
+        return plan
+
+    if kind != "launchd":
+        raise ValueError("--kind: launchd, cron or schtasks")
+    times = ([{"Hour": h, "Minute": minute} for h in range(0, 24, every_hours)] if hour is None
+             else {"Hour": hour, "Minute": minute})
+    plist = plistlib.dumps({"Label": label, "ProgramArguments": ["/bin/sh", wrapper],
+                            "StartCalendarInterval": times, "RunAtLoad": False}).decode()
+    local = os.path.join(d, f"{label}.plist")
+    agent = os.path.join(home, "Library", "LaunchAgents", f"{label}.plist")
+    plan["files"].append({"path": local, "content": plist})
+    target = f"gui/$(id -u)/{label}"
+    plan["install"] = [f"cp {shlex.quote(local)} {shlex.quote(agent)}",
+                       f"launchctl bootstrap gui/$(id -u) {shlex.quote(agent)}"]
+    plan["run_now"] = [f"launchctl kickstart -k {target}"]
+    plan["check"] = [f"launchctl print {target}", f"tail -n 20 {shlex.quote(log)}"]
+    plan["remove"] = [f"launchctl bootout {target}", f"rm {shlex.quote(agent)}"]
+    plan["notes"].append("launchd uses the Mac's time zone. A run missed while the Mac slept starts once when it wakes")
+    if py == "/usr/bin/python3":
+        plan["notes"].append("/usr/bin/python3 needs the Xcode Command Line Tools (xcode-select --install). "
+                             "Run it once by hand before the first scheduled run")
+    if any(d.startswith(os.path.join(home, x) + os.sep) or d == os.path.join(home, x)
+           for x in ("Desktop", "Documents", "Downloads")):
+        plan["notes"].append("macOS privacy protection can block a launchd job in Desktop, Documents or Downloads. "
+                             "Use a folder such as ~/vuln-digest")
+    return plan
+
+
+def run_schedule(a):
+    args = a.feed_args[1:] if a.feed_args[:1] == ["--"] else a.feed_args
+    plan = schedule_plan(a.kind, a.dir, args, a.every_hours, a.at, a.minute, a.label, a.then, a.python)
+    if a.write:
+        for f in plan["files"]:
+            with open(f["path"], "w", newline="") as fh:
+                fh.write(f["content"])
+            if f.get("mode"):
+                os.chmod(f["path"], int(f["mode"], 8))
+        plan["written"] = [f["path"] for f in plan["files"]]
+    return plan
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="command", required=True)
@@ -922,8 +1047,25 @@ def main():
     p_cpe.add_argument("--max", type=int, default=10, help="max prefixes to return (default 10)")
     p_cpe.add_argument("--nvd-cpe-api", default=NVD_CPE_API, help=argparse.SUPPRESS)
 
+    p_sch = sub.add_parser("schedule", help="files and commands for launchd, cron or Task Scheduler")
+    p_sch.add_argument("--kind", required=True, choices=["launchd", "cron", "schtasks"])
+    p_sch.add_argument("--dir", required=True, help="the folder with vuln_feed.py, the profile and the state")
+    p_sch.add_argument("--every-hours", type=int, help="run every H hours (1-12)")
+    p_sch.add_argument("--at", help="run daily at HH:MM, the computer's time zone")
+    p_sch.add_argument("--minute", type=int, help="the minute (default: random)")
+    p_sch.add_argument("--label", default="vuln-digest-alerts", help="the job name and the file names")
+    p_sch.add_argument("--then", help="a command to run when vuln_feed.py exits with 10 (the agent CLI)")
+    p_sch.add_argument("--python", help="the Python 3.9+ to run (default: the one running this script)")
+    p_sch.add_argument("--write", action="store_true", help="write the files into --dir (installs nothing)")
+    p_sch.add_argument("feed_args", nargs=argparse.REMAINDER, help="-- then the vuln_feed.py command and options")
+
     a = ap.parse_args()
-    if a.command == "scan":
+    if a.command == "schedule":
+        try:
+            out = run_schedule(a)
+        except ValueError as e:
+            raise SystemExit(f"schedule: {e}")
+    elif a.command == "scan":
         out = run_scan(a)
     elif a.command == "suggest-sources":
         out = run_suggest_sources(a)

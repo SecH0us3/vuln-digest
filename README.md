@@ -2,7 +2,7 @@
 
 This file is a task for an AI assistant: Claude, ChatGPT, Gemini, Codex, Cursor or any other. The user gives the assistant this file and asks it to set up a vulnerability digest. The address of this file is https://vuln-digest.secmy.app/README.md
 
-Version: 1.7.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
+Version: 1.8.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
 
 If you are a person, the overview is at https://vuln-digest.secmy.app/ - give the address of this file to your AI assistant and it does the rest
 
@@ -61,7 +61,7 @@ Name only the tools you have or the user can connect. If the user picks a tool t
 - the repositories of products the user names, or, for an organization, the repositories with recent commits. If there are more than about 20, ask which ones matter;
 - the files in "Find the stack yourself" below: lock files, Dockerfiles, Helm charts, Terraform, Kubernetes manifests, CI;
 - infrastructure and architecture pages in the wiki: what runs where, what is exposed to the internet, network and VPN equipment, SaaS;
-- the issue tracker only if the user points you to it
+- the issue tracker only if the user points you to it. If the user wants the digest to show tickets that already exist for a finding, and the job will have the same read access, set `tracker` in the profile (R5)
 
 Do not clone, install or run anything, and do not change anything. Do not copy source code, secrets, internal hostnames or personal data into the profile: keep product and package names, versions, and where you found them
 
@@ -90,7 +90,7 @@ Ask step by step, not all at once. A wall of thirteen questions gets answered "d
 Ask in this order. Skip a question that step 0 or an earlier answer already settled
 
 1. **The stack** - questions 1, 2 and 13. If step 0 found the stack, this round is only its confirmation (step 0, point 3). These answers are free text: ask them as text, or as choices only where you have a guess to offer, such as "nginx and PHP 8.3 are in production: yes / no / partly"
-2. **Preview** - if you can fetch the sources now, show a short preview before the other questions: what the last 7 days would look like for this stack, in the short format, five to ten lines. Use `fetch --all`, which does not touch any state, or read the sources by hand. It is easier to answer "what should I never show" and "how detailed" with a real example in front of you. Say it is a preview and that nothing is scheduled yet
+2. **Preview** - if you can fetch the sources now, show a short preview before the other questions: what the last 7 days would look like for this stack, in the short format, five to ten lines. Use `fetch --all`, which does not touch any state, or read the sources by hand. With `osv` and a large packages file, `--all` downloads every advisory that affects the packages and can take many minutes: add `--osv-max 50`, or leave `osv` out of the preview. It is easier to answer "what should I never show" and "how detailed" with a real example in front of you. Say it is a preview and that nothing is scheduled yet
 3. **Shortcut** - one question: "Keep the defaults for everything else, or go through it?" with the two choices and a one-line summary of the defaults: when it runs, where it goes, what it shows. If the user keeps the defaults, skip to the last round
 4. **When** - questions 5, 6, 7 and 8. For question 5, offer "weekdays at 08:00", "daily at 08:00", "weekly on Monday" and let the user type another time. Ask for the time zone only if you do not know it
 5. **What** - questions 3, 4, 10 and 12
@@ -172,6 +172,8 @@ stack_sources:               # where step 0 read the stack, for the rescan. Name
   - { kind: github, repos: [acme/web-shop, acme/infra] }
   - { kind: confluence, pages: ["Infrastructure overview"] }
 rescan: monthly              # monthly | off - see step 0
+tracker: none                # none | jira | github | gitlab - look up existing tickets, read only, see R5
+blocked_hosts: []            # hosts the job's network does not allow, see R2. Not reported as failed sources
 
 ignore:                      # never show
   - WordPress plugins
@@ -188,6 +190,8 @@ pause_alerts: false          # true: no urgent alerts during the pause either
 ```
 
 The packages file has one package per line in the form `ecosystem|name|version`, with ecosystem names as OSV uses them (for example `npm`, `PyPI`, `NuGet`, `Go`, `Maven`, `crates.io`, `RubyGems`, `Packagist`). Check the current list of ecosystem names in the OSV documentation
+
+Write each `ignore`, `boost` and `less` entry as a short name that appears in the titles of the sources, not as a description. `vuln_feed.py match` finds an entry only as that exact text, so "Android/iOS/ChromeOS-only Chrome releases" never matches, while `ChromeOS`, `Chrome for Android`, `Chrome for iOS` and `Chrome Beta` do. A rule that needs judgement, such as "DoS without code execution", can stay as a phrase: the job applies it by meaning in R3, and `match` warns about it
 
 Keep the profile in this simple form: `key: value` lines, lists with `- `, and `[..]` or `{..}` on one line. `vuln_feed.py match` and `alert-prefilter` read it without PyYAML. JSON works too. Block scalars (`|`, `>`), anchors and tags do not
 
@@ -235,6 +239,8 @@ Rules for the schedule:
 - if the user wants urgent alerts, you need a second, more frequent job (for example every 2 hours) that only checks items in focus for "exploited" or "public exploit" and stays silent otherwise. Most of its runs find nothing, so where the scheduler can run a command (cron, launchd, Task Scheduler, CI), let `vuln_feed.py alert-prefilter` run first and start the agent only when it asks for one (R8). If the platform does not allow a second job, tell the user, and put urgent items at the top of the next digest instead;
 - the weekly summary can be the same job: on the chosen day, the run adds the weekly part (see "Digest format");
 - two jobs never share a state: the urgent-alert job has its own state file and snapshot file (R8)
+
+On the user's own computer, `vuln_stack.py schedule` writes the wrapper script and the launchd plist, the cron line or the Task Scheduler command with absolute paths, and prints the commands to install it, run it once, check it and remove it (see "Helper scripts"). It never installs anything by itself: show the user the files and the commands, run them with the user's consent, then run the job once (`run_now`) and show the log. On macOS, `/usr/bin/python3` works only after the Xcode Command Line Tools are installed (`xcode-select --install`), and a launchd job may be denied access to Desktop, Documents and Downloads, so keep the folder elsewhere
 
 For GitHub Actions:
 
@@ -322,6 +328,8 @@ One vulnerability often comes from several sources: a Zero Wire briefing, a vend
 
 Without the script, do the same by hand: fetch each source, give each item a key (`zerowire:<slug>`, `kev:<CVE>`, `osv:<ID>`), and compare its updates with the state. An update is identified by its date and text, not by a guid, a "last reviewed" date or a modification time, because those change without news
 
+**Where the job runs decides what it can reach.** A script on the user's computer uses the user's network. An agent in a cloud sandbox goes through the sandbox's egress allow list. The same feed can work in one place and be blocked in the other, so at setup run `check-feeds` from the place where the job will run, and from both places if the work is split (a local `fetch` or `alert-prefilter` and a cloud agent, see R8). For a host the job cannot reach, the user can allow it in the platform's settings, the job can read that source with the platform's web fetch tool, or the local computer can do the fetch and the agent reads `last_run.json`. If the user decides to leave a host blocked, put it in `blocked_hosts`: then its error is not a failed source in R6, but `status` and the weekly summary name it once, so the gap in coverage stays visible
+
 If the platform cannot reach a source directly (a proxy refuses it), use the platform's web fetch tool. Long feeds may need to be read in parts. Some fetch tools return a summary instead of the page: then an update's text is not stable between runs, so identify updates by item key and update date only, and ask the tool for dates, CVE ids and versions exactly as written
 
 ### R3. Match the items to the profile
@@ -357,9 +365,15 @@ EPSS is a probability of exploitation in the next 30 days. Show it as a percent 
 
 For each item in focus give one concrete action, from the source: the fixed versions, the workaround, the setting to change, the WAF rule. If the source has no fix yet, say so and give the mitigation it suggests. Add a command that checks whether the user is affected when there is a simple one (`nginx -v`, `java -version`, `npm ls <package>`)
 
+If the profile sets `tracker`, search the tracker for each item in focus by its CVE ids and its advisory id (`GHSA-...`, the vendor's bulletin id), with the connector the job has. Read only: never create, change or comment on a ticket (rule 7). Show what you found on the item's "Tracker" line:
+
+- an open ticket: its key, status and assignee - the work is under way, so lower nothing, but do not tell the user to start it again;
+- a closed ticket while the user's version is still affected: "closed, but still affected" - this is a finding of its own, say it in "Main thing today" if the item is high or urgent;
+- nothing found: leave the line out. If the tracker could not be read, say so once at the end of the digest, as for a failed source
+
 ### R6. Write the digest
 
-Use the format in the "Digest format" section and the language and length from the profile. If any source failed in R2, add one line at the end: which source, and that its items will come in the next digest
+Use the format in the "Digest format" section and the language and length from the profile. If any source failed in R2, add one line at the end: which source, and that its items will come in the next digest. An error from a host in `blocked_hosts` is not a failure: leave it out of that line
 
 Before you deliver, check the day:
 
@@ -399,11 +413,19 @@ It fetches with the alert job's state, matches the items to the profile as `matc
 
 If the agent does not run or fails, the snapshot stays unmarked and the next prefilter run finds the same candidates again. With `paused_until` in the future and `pause_alerts: true`, it fetches nothing and exits with 0
 
-A cron line for every 2 hours, at a random minute (on macOS, a launchd agent with `StartCalendarInterval` does the same; the agent CLI and its options depend on the platform):
+A cron line for every 2 hours, at a random minute (on macOS, a launchd agent with `StartCalendarInterval` does the same, and `vuln_stack.py schedule` writes either with the right paths; the agent CLI and its options depend on the platform):
 
 ```sh
 17 */2 * * * cd ~/vuln-digest && python3 -I vuln_feed.py alert-prefilter --profile profile.yaml <options>; [ $? -eq 10 ] && <agent CLI> -p "$(cat alert-prompt.md)"
 ```
+
+**When the agent has its own schedule.** Many cloud agents run on their own scheduler and cannot be started from the user's computer. Then the two parts run apart: the computer runs `alert-prefilter` (for example at :05), and the agent starts on its own schedule a little later (at :22) in a folder where it can read the same files. The agent runs `alert-prefilter` with the same options plus `--reuse-if-fresh <minutes>`, set to the alert interval plus a margin (150 for every 2 hours):
+
+- if the pending file is younger than that, the script does not fetch. It exits with 0 when there are no candidates or when the snapshot was already marked (an earlier agent run handled them: do not send the same alert again), and with 10 when candidates wait. On 0, stop at once and send nothing;
+- if the pending file is older or missing (the computer slept or was off), the script fetches itself, as the fallback, and the agent goes on as on any run;
+- on 10, the agent continues as above: read the candidates, send the urgent ones, then `mark`
+
+Without the script, the agent does the same by hand: stop if the snapshot is missing or has `"marked"`, and fetch itself if `checked` in the pending file is older than the interval plus a margin
 
 Where the scheduler can only start the agent, the agent runs the same commands itself: `fetch` with the two options, `match --profile profile.yaml`, then the urgent items only, then `mark` with the same two options, also when nothing was urgent, so the alert job does not look at the same items again. Stay silent if nothing is urgent. The daily digest keeps its own state, so it still shows the item in full the next morning
 
@@ -446,6 +468,7 @@ Sources: Zero Wire, CISA KEV · 4 new, 1 update · 3 in your focus
 - **What it is:** php2shell (CVE-2026-109618, CVE-2026-109619) gives remote code execution. The same releases fix phpAfterShell: session file corruption leading to unserialize, FastCGI request smuggling in PHP-FPM, use-after-free bugs
 - **Exploited:** yes, php2shell is in CISA KEV since 26 October. phpAfterShell: not seen in the wild
 - **What to do:** update PHP today. Check with `php -v`
+- **Tracker:** SEC-412 (in progress, Dana) - only if the profile sets `tracker`
 
 ### 2. nginx2root - RCE in nginx HTTP/2, HTTP/3 and the resolver
 *18 November · [source](https://...) · ingress-nginx, k8s*
@@ -491,7 +514,8 @@ If `quiet_day` is `one_line`, send one line: "Nothing new for your stack since <
 
 On the chosen day, add a section (or send a separate message if the profile says so):
 
-- **Still open** - items in focus from the last 4 weeks that were not marked as patched, with their current status. `python3 -I vuln_feed.py history --days 28` lists the delivered items with their titles, links and last updates;
+- **Still open** - items in focus from the last 4 weeks that were not marked as patched, with their current status, and their ticket if the profile sets `tracker`. `python3 -I vuln_feed.py history --days 28` lists the delivered items with their titles, links and last updates;
+- **Not covered** - if `blocked_hosts` is not empty, one line: which sources the job cannot reach and that the user can allow them;
 - **Status changes this week** - added to KEV, a public exploit appeared, a fix came out, a fix was found to be incomplete;
 - **The week in numbers** - items seen, items in focus, urgent items;
 - **One thing to do this week** - the most useful action for this user;
@@ -519,7 +543,7 @@ The user changes the digest by answering it in plain words. Change the profile, 
 | "snooze X for 2 weeks", "until the maintenance window" | add the item to `patched` until that date, with `why: snoozed`. When the date passes, it comes back once as still open |
 | "pause until <date>", "I am on holiday" | set `paused_until`. Say that urgent alerts go on, unless the user also says "pause alerts" (`pause_alerts: true`) |
 | "check CVE-YYYY-NNNN", "am I affected by <name>" | a one-off answer, nothing changes: read what the sources say about it (`fetch --all`, an OSV query for the packages file, the vendor's advisory), match it to the stack as in R3 and R4, and answer in a few lines with the source links |
-| "status" | answer in a few lines: the date of the last digest (`last_digest` in the state), the next run, the sources and which of them failed in the last digest (its line about failed sources: the state does not keep errors), what is in `ignore`, `less` and `patched`, and `paused_until` |
+| "status" | answer in a few lines: the date of the last digest (`last_digest` in the state), the next run, the sources and which of them failed in the last digest (its line about failed sources: the state does not keep errors), what is in `ignore`, `less` and `patched`, `paused_until`, and the hosts in `blocked_hosts` |
 | "I also use X", "I no longer use X" | change `stack` |
 | "refresh packages" | run `vuln_stack.py scan --diff packages.txt --out packages.txt` (or read the lock files again if Python is not available) and show what was added, removed or updated |
 | "send it at 9", "only on Mondays" | change the schedule and `schedule`, say the next run time |
@@ -582,6 +606,8 @@ Do not fetch more than needed: one fetch of each source per run is enough. Use t
 
 The project ships two small Python 3.9+ scripts that use only the standard library. Read each script before you run it, as you would any script from the internet, and run both with `python3 -I`
 
+Run them in the foreground with a timeout, for example 10 minutes. Some sandboxes kill a background process as soon as the shell call that started it ends, so do not start them with `nohup` or `&` and poll. How long a run takes: `fetch` with a state and the default sources, a few feeds and EPSS usually takes 10 to 60 seconds. The first run with a large packages file, `--all` with `osv`, or `nvd` without `NVD_API_KEY` (one request every 6 seconds) can take several minutes. `match`, `mark` and `history` take a second
+
 ### `vuln_feed.py` (every scheduled run)
 
 `vuln_feed.py` does the fetching and the deduplication of R2 and the marking of R7. Download it from https://vuln-digest.secmy.app/vuln_feed.py and keep the copy next to the state (step 6)
@@ -597,6 +623,7 @@ The project ships two small Python 3.9+ scripts that use only the standard libra
 | `check-feeds --feeds FILE` | reads each feed once and reports its format, entries, newest date, entries with a CVE, and problems, with every host it went to (`hosts`), its `redirects` and `final_url`. Touches no state |
 | `match --profile FILE` | matches the items of `last_run.json` (or of a saved fetch output given with `--input`) to the profile: names, aliases, the packages file, `ignore`, `boost`, `less` and `patched`. Prints a verdict per item (`focus`, `maybe`, `outside`, `ignored`, `patched`), what matched where, and `warnings` about noisy names. No network |
 | `alert-prefilter --profile FILE --pending FILE` | the urgent-alert run without an agent (R8): fetch, match, keep items in focus with a sign of exploitation. Exit code 0 and the snapshot marked when there are none, 10 and the candidates in the pending file when the agent is needed. Takes the fetch options |
+| `alert-prefilter ... --reuse-if-fresh MINUTES` | for an agent on its own schedule (R8): if the pending file is younger than MINUTES, use it instead of fetching. Exit 0 when there are no candidates or the snapshot is already marked, 10 when candidates wait. An older or missing pending file means a normal run |
 | `--strict` | `fetch` and `alert-prefilter` exit with code 3 when `errors` is not empty, `check-feeds` when a feed has a problem. The output and the snapshot are written all the same |
 | `--sources zerowire,kev,feeds,osv,ghsa,nvd` | which sources to use |
 | `--feeds FILE` | vendor RSS or Atom feeds, one `name\|url` per line. Each entry is one item |
@@ -604,6 +631,7 @@ The project ships two small Python 3.9+ scripts that use only the standard libra
 | `--ghsa FILE` | GitHub repositories (`owner/repo`) and packages (`package\|ecosystem\|name`) for GHSA. Reads optional `GITHUB_TOKEN` from the environment and sends it only over https |
 | `--nvd FILE` | products to watch in NVD, one `name\|cpe:2.3:...` per line. Reads optional `NVD_API_KEY` from the environment and pauses between requests to respect NVD limits |
 | `--nvd-days 30` | NVD publication window in days (1 to 119, default 30). Old CVEs that NVD modifies again are not news and are not read |
+| `--osv-max N` | downloads at most N OSV advisories and reports the run as partial. For a quick preview with `--all` |
 | `--epss` | adds EPSS scores |
 | `--cve-details` | adds CVSS scores and affected version ranges from CVE.org for items that lack them (capped by `--cve-details-max`, default 30) |
 | `--kev-max-age 30` | KEV entries older than N days are not news (the catalog has more than a thousand). They still mark items of other sources as exploited |
@@ -638,7 +666,7 @@ For a platform with an egress allow list. Allow only the hosts of the options yo
 | `vuln-digest.secmy.app` | the weekly update check and updates (see "Updates"), not the scripts |
 | the vendor page you give it | `vuln_stack.py discover-feeds` |
 
-`vuln_stack.py scan` and `suggest-sources`, and `vuln_feed.py match`, `mark` and `history`, use no network
+`vuln_stack.py scan`, `suggest-sources` and `schedule`, and `vuln_feed.py match`, `mark` and `history`, use no network
 
 ### `vuln_stack.py` and `catalog.json` (setup and rescan only)
 
@@ -653,3 +681,4 @@ For a platform with an egress allow list. Allow only the hosts of the options yo
 | `suggest-sources --stack a,b,c` | matches confirmed products against `catalog.json` and outputs verified `feeds`, `ghsa` and `nvd` candidates plus `unmatched` |
 | `discover-feeds <url>` | reads a vendor security page (http/https only) and lists RSS, Atom and GitHub Security Advisories links found on it |
 | `find-cpe <query>` | queries the NVD CPE 2.0 API (optional `NVD_API_KEY` env var) and returns grouped `cpe:2.3` prefixes |
+| `schedule --kind launchd\|cron\|schtasks --dir DIR (--every-hours H \| --at HH:MM) -- <vuln_feed.py command>` | prints a wrapper script and the launchd plist, cron line or Task Scheduler command, with absolute paths and the Python that runs it, plus the commands to install, run once, check and remove the job, and notes such as the Xcode Command Line Tools. The wrapper logs each run to `<label>.log`, writes `<label>.heartbeat` after exit 0 or 10 (R8), and runs `--then <agent CLI>` on exit 10. `--write` saves the files into DIR; it never installs or starts anything |

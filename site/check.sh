@@ -50,7 +50,7 @@ done
 lines="$(wc -l < tools/vuln_feed.py)"
 [ "$lines" -ge 1450 ] && [ "$lines" -le 1750 ] || fail "vuln_feed.py has $lines lines: update the landing page text"
 stack_lines="$(wc -l < tools/vuln_stack.py)"
-[ "$stack_lines" -ge 650 ] && [ "$stack_lines" -le 950 ] || fail "vuln_stack.py has $stack_lines lines: update the landing page text"
+[ "$stack_lines" -ge 950 ] && [ "$stack_lines" -le 1250 ] || fail "vuln_stack.py has $stack_lines lines: update the landing page text"
 
 # --- The instructions page ---
 grep -qF '<nav class="site-header"' "$DOCS" || fail 'the instructions page has no header with a link to the landing page'
