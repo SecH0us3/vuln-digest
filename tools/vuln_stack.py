@@ -35,7 +35,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CATALOG = os.path.join(HERE, "catalog.json")
@@ -943,12 +943,16 @@ def schedule_plan(kind, d, args, every_hours=None, at=None, minute=None, label="
     if kind == "schtasks":
         if any('"' in x or "%" in x for x in [d, py, then or "", *args]):
             raise ValueError('Task Scheduler: no " or % in paths, arguments or --then')
+        if then is not None and not then.strip():
+            raise ValueError("--then must not be empty")
         wrapper = os.path.join(d, f"{label}.cmd")
         q = " ".join(f'"{x}"' for x in args)
-        lines = ["@echo off", f'cd /d "{d}"', f'"{py}" -I "{feed}" {q} >> "{log}" 2>&1', "set rc=%ERRORLEVEL%",
-                 f'if %rc%==0 echo %DATE% %TIME%> "{beat}"', f'if %rc%==10 echo %DATE% %TIME%> "{beat}"']
+        lines = ["@echo off", f'cd /d "{d}"', f'"{py}" -I "{feed}" {q} >> "{log}" 2>&1', "set rc=%ERRORLEVEL%"]
         if then:
-            lines.append(f'if %rc%==10 {then} >> "{log}" 2>&1')
+            lines += [f'if %rc%==10 (', f'  {then} >> "{log}" 2>&1', "  set rc=%ERRORLEVEL%", ")"]
+            lines.append(f'if %rc%==0 echo %DATE% %TIME%> "{beat}"')
+        else:
+            lines += [f'if %rc%==0 echo %DATE% %TIME%> "{beat}"', f'if %rc%==10 echo %DATE% %TIME%> "{beat}"']
         plan["files"].append({"path": wrapper, "content": "\r\n".join(lines + ["exit /b %rc%"]) + "\r\n"})
         when = (f"/SC HOURLY /MO {every_hours} /ST 00:{minute:02d}" if hour is None
                 else f"/SC DAILY /ST {hour:02d}:{minute:02d}")
@@ -959,17 +963,22 @@ def schedule_plan(kind, d, args, every_hours=None, at=None, minute=None, label="
         plan["notes"].append("the task runs only while the user is logged on, unless it is created with a password")
         return plan
 
+    then_parts = shlex.split(then) if then and then.strip() else []
+    if then is not None and not then_parts:
+        raise ValueError("--then must not be empty")
     wrapper = os.path.join(d, f"{label}.sh")
     lines = ["#!/bin/sh", "# vuln-digest scheduled run, written by vuln_stack.py schedule",
              f"exec >> {shlex.quote(log)} 2>&1", f"cd {shlex.quote(d)} || exit 1",
              'echo "--- $(date -u +%Y-%m-%dT%H:%M:%SZ)"',
-             " ".join(shlex.quote(x) for x in [py, "-I", feed, *args]), "rc=$?", 'echo "exit $rc"',
-             f'if [ $rc -eq 0 ] || [ $rc -eq 10 ]; then date -u +%Y-%m-%dT%H:%M:%SZ > {shlex.quote(beat)}; fi']
+             " ".join(shlex.quote(x) for x in [py, "-I", feed, *args]), "rc=$?", 'echo "exit $rc"']
     if then:
-        lines.append(f"if [ $rc -eq 10 ]; then {then}; fi")
+        lines.append(f'if [ $rc -eq 10 ]; then {then}; rc=$?; echo "then exit $rc"; fi')
+        lines.append(f'if [ $rc -eq 0 ]; then date -u +%Y-%m-%dT%H:%M:%SZ > {shlex.quote(beat)}; fi')
+    else:
+        lines.append(f'if [ $rc -eq 0 ] || [ $rc -eq 10 ]; then date -u +%Y-%m-%dT%H:%M:%SZ > {shlex.quote(beat)}; fi')
     plan["files"].append({"path": wrapper, "content": "\n".join(lines + ["exit $rc"]) + "\n", "mode": "755"})
     run = f"/bin/sh {shlex.quote(wrapper)}"
-    if then and not os.path.isabs(shlex.split(then)[0]):
+    if then_parts and not os.path.isabs(then_parts[0]):
         plan["notes"].append("cron and launchd start jobs with a short PATH: give --then with the full path of the agent CLI")
 
     if kind == "cron":
@@ -1012,6 +1021,7 @@ def run_schedule(a):
     args = a.feed_args[1:] if a.feed_args[:1] == ["--"] else a.feed_args
     plan = schedule_plan(a.kind, a.dir, args, a.every_hours, a.at, a.minute, a.label, a.then, a.python)
     if a.write:
+        os.makedirs(a.dir, exist_ok=True)
         for f in plan["files"]:
             with open(f["path"], "w", newline="") as fh:
                 fh.write(f["content"])

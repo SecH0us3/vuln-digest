@@ -420,15 +420,19 @@ class VulnStackTest(unittest.TestCase):
         self.assertTrue(all(t["Minute"] == 17 for t in pl["StartCalendarInterval"]))
         self.assertTrue(plan["install"][1].startswith("launchctl bootstrap gui/$(id -u) "))
         self.assertIn("full path of the agent CLI", " ".join(plan["notes"]))
-        # the wrapper runs the script, logs, writes the heartbeat and starts the agent on exit 10
+        # the wrapper runs the script, logs, starts the agent on exit 10, and writes the heartbeat on agent success
         r = subprocess.run(["/bin/sh", os.path.join(d, "vuln-digest-alerts.sh")], capture_output=True, text=True)
-        self.assertEqual(r.returncode, 10)
+        self.assertEqual(r.returncode, 0)
         self.assertTrue(os.path.exists(os.path.join(d, "agent-started")))
         self.assertTrue(os.path.exists(os.path.join(d, "vuln-digest-alerts.heartbeat")))
         with open(os.path.join(d, "vuln-digest-alerts.log")) as f:
             log = f.read()
         self.assertIn("'alert-prefilter', '--profile', 'profile.yaml'", log)
         self.assertIn("exit 10", log)
+        self.assertIn("then exit 0", log)
+        # empty --then is rejected
+        self.assertNotEqual(self.run_tool("schedule", "--kind", "cron", "--dir", d, "--every-hours", "2",
+                                          "--then", "   ", "--", "fetch", ok=False).returncode, 0)
 
         cron = json.loads(self.run_tool("schedule", "--kind", "cron", "--dir", d, "--at", "07:42", "--",
                                         "fetch", "--sources", "zerowire,kev").stdout)

@@ -1,12 +1,17 @@
 {
-  "version": "1.8.0",
+  "version": "1.8.1",
   "sha256": {
-    "README.md": "32fda0c4e9beba770d7aaea77ed213724e34c1e1dd6ef6e323bd2e87e98f1ee9",
-    "vuln_feed.py": "b4e7761c3c2342ef921e0076e89e531ed6a642d92fd8ee4bac23ec0e1dc58dd1",
-    "vuln_stack.py": "f81f55c3acb16f153780d4503a917668f95c6247b6208c5b92452adf46be400e",
-    "catalog.json": "55d6294c60f53c75316fe9d80701c9c39116f6279fc8c51451594ebd1b4e57bf"
+    "README.md": "eb74f68301efdc540244d72af59eb1782083526347f7e5fd1daab12305241c2f",
+    "vuln_feed.py": "451e6d9db284e5985032536b45d24142bb6f11f60a0a3e4745fb92adf495b05e",
+    "vuln_stack.py": "61cc3667853b2e8b2814ba156c7eb5173b8c227b271708abba3c95187f369aa9",
+    "catalog.json": "0f4287fe3f1a46b69368430cf0ac1a3a4550f6d5342c626d2ad4c18e21cfa716"
   },
   "releases": [
+    {
+      "version": "1.8.1",
+      "date": "2026-11-24",
+      "summary": "Fixes: errors record the failed host and respect blocked_hosts with --strict, match marks OS and cloud umbrella feed hits as maybe and includes fixed_versions, YAML keeps unquoted colons in ignore/boost/less, and schedule tracks --then exit code for heartbeat"
+    },
     {
       "version": "1.8.0",
       "date": "2026-11-24",
