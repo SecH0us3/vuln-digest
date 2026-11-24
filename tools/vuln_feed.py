@@ -77,7 +77,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 ZEROWIRE_FEED = "https://radar.cloudflare.com/zero-wire/feed"
 KEV_JSON = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -148,13 +148,19 @@ def http_get(url, timeout=60, data=None, extra_headers=None, trace=None):
         headers.update(extra_headers)
     if data is not None:
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(web_url(url), data=data, headers=headers)  # noqa: S310
-    opener = OPENER if trace is None else urllib.request.build_opener(SafeRedirect(trace))
-    with opener.open(req, timeout=timeout) as r:
-        body = r.read(MAX_BYTES + 1)
-    if len(body) > MAX_BYTES:
-        raise ValueError(f"response larger than {MAX_BYTES} bytes: {url}")
-    return body
+    tr = trace if trace is not None else [url]
+    if not tr:
+        tr.append(url)
+    try:
+        req = urllib.request.Request(web_url(url), data=data, headers=headers)  # noqa: S310
+        with urllib.request.build_opener(SafeRedirect(tr)).open(req, timeout=timeout) as r:
+            body = r.read(MAX_BYTES + 1)
+        if len(body) > MAX_BYTES:
+            raise ValueError(f"response larger than {MAX_BYTES} bytes: {url}")
+        return body
+    except Exception as e:
+        e._trace = list(tr)
+        raise
 
 
 def http_post_json(url, obj, timeout=60):
@@ -337,6 +343,18 @@ def fetch_error(e, trace):
         msg += (f" (redirected: {' -> '.join(trace)}; the failed request went to "
                 f"{urllib.parse.urlsplit(trace[-1]).hostname})")
     return msg
+
+
+def err_entry(source, e, prefix="", trace=None, partial=False):
+    tr = trace if trace is not None else getattr(e, "_trace", None) or []
+    row = {"source": source, "error": f"{prefix}{fetch_error(e, tr)}"}
+    if tr and urllib.parse.urlsplit(tr[-1]).scheme in ("http", "https"):
+        host = urllib.parse.urlsplit(tr[-1]).hostname
+        if host:
+            row["host"] = host
+    if partial:
+        row["partial"] = True
+    return row
 
 
 def check_feed(name, url):
@@ -537,7 +555,7 @@ def fetch_osv(packages, known, api=OSV_API, osv_file=None, max_get=0):
         try:
             items.append(osv_item(full.get(vid) or osv_get(api, vid), pkgs))
         except Exception as e:  # one advisory that cannot be read must not hide the others
-            errors.append({"source": "osv", "error": f"{vid}: {type(e).__name__}: {e}", "partial": True})
+            errors.append(err_entry("osv", e, prefix=f"{vid}: ", partial=True))
     if skipped:
         errors.append({"source": "osv", "error": f"{skipped} advisory(ies) not downloaded: --osv-max {max_get}",
                        "partial": True})
@@ -882,7 +900,7 @@ def add_cve_details(items, api=CVE_ORG_API, max_cves=30):
             if info:
                 details[cve] = info
         except Exception as e:
-            errors.append({"source": "cve_org", "error": f"{cve}: {type(e).__name__}: {e}", "partial": True})
+            errors.append(err_entry("cve_org", e, prefix=f"{cve}: ", partial=True))
     for i in items:
         d = {c: details[c] for c in i["cves"] if c in details}
         if d:
@@ -985,15 +1003,38 @@ def mark(state, items, today, only_before=None):
 
 def strip_comment(line):
     """Drop a # comment that starts the line or follows a space, outside quotes"""
-    q = None
+    q, esc = None, False
     for n, c in enumerate(line):
-        if q:
+        if esc:
+            esc = False
+        elif q == '"' and c == "\\":
+            esc = True
+        elif q:
             q = None if c == q else q
         elif c in "\"'":
             q = c
         elif c == "#" and (n == 0 or line[n - 1] in " \t"):
             return line[:n].rstrip()
     return line.rstrip()
+
+
+def bracket_depth(s):
+    """Net unclosed [ and { outside quotes"""
+    q, esc, d = None, False, 0
+    for c in s:
+        if esc:
+            esc = False
+        elif q == '"' and c == "\\":
+            esc = True
+        elif q:
+            q = None if c == q else q
+        elif c in "\"'":
+            q = c
+        elif c in "[{":
+            d += 1
+        elif c in "]}":
+            d -= 1
+    return d
 
 
 def yaml_scalar(s):
@@ -1060,7 +1101,7 @@ def yaml_lines(text):
             buf = [n, len(line) - len(line.lstrip()), line.strip()]
         if re.match(r"[|>][-+]?$|[&*!]", re.sub(r"^(- )?[^:]*:\s*", "", buf[2]) or "-"):
             raise ValueError(f"line {n}: block scalars, anchors and tags are not supported")
-        depth = sum(buf[2].count(c) for c in "[{") - sum(buf[2].count(c) for c in "]}")
+        depth = bracket_depth(buf[2])
         if depth <= 0:
             out.append(buf)
             buf = None
@@ -1143,6 +1184,13 @@ send mime once color commander async util log time date string buffer stream url
 client server shell agent socket ws yaml json http sql base app api web cli kit view chart test""".split())
 # the publisher of a source names itself in nearly every entry
 PUBLISHERS = {"zerowire": "cloudflare", "kev": "cisa", "ghsa": "github", "nvd": "nvd"}
+# umbrella OS, distro and cloud feeds name the OS or vendor in every entry, even for unrelated packages
+UMBRELLA_FEEDS = {
+    "ubuntu": {"ubuntu", "canonical"}, "debian": {"debian"}, "redhat": {"red hat", "redhat", "rhel"},
+    "rhel": {"red hat", "redhat", "rhel"}, "suse": {"suse", "opensuse", "sles"}, "opensuse": {"suse", "opensuse"},
+    "oracle": {"oracle", "oracle linux"}, "aws": {"aws", "amazon", "amazon web services"},
+    "gcp": {"gcp", "google cloud"}, "azure": {"azure", "microsoft"}, "apache": {"apache"}, "spring": {"spring"},
+}
 SIGNAL_RE = re.compile(r"exploit|in the wild|proof[- ]of[- ]concept|\bpoc\b|ransomware|weaponi[sz]|zero[- ]day|0-day", re.I)
 
 
@@ -1179,6 +1227,9 @@ def profile_terms(prof, base):
                 out.append(("package", f"{p['ecosystem']}|{p['name']}", p["name"], {"version": p.get("version", "")}))
     for kind in ("ignore", "boost", "less"):
         for t in prof.get(kind) or []:
+            if isinstance(t, dict) and len(t) == 1:
+                k, v = next(iter(t.items()))
+                t = f"{k}: {v}" if v is not None else f"{k}:"
             if isinstance(t, str) and t.strip():
                 out.append((kind, t.strip(), t.strip(), {}))
     return out
@@ -1216,26 +1267,31 @@ def match_items(items, prof, base, today):
     out, weak_hits = [], {}
     for i in items:
         strong, weak = item_fields(i)
-        publisher = PUBLISHERS.get(i.get("source", "").split(":")[0])
-        own = i.get("source", "").split(":")[0] in ("osv", "ghsa", "nvd") or i.get("source", "").startswith("feeds:")
-        m = {"key": i["key"], "title": i.get("title"), "source": i.get("source"), "matches": []}
+        src = i.get("source", "")
+        publisher = PUBLISHERS.get(src.split(":")[0])
+        umb = UMBRELLA_FEEDS.get(src.split(":", 1)[1].lower() if src.startswith("feeds:") else "", set())
+        own = src.split(":")[0] in ("osv", "ghsa", "nvd") or (src.startswith("feeds:") and not umb)
+        m = {"key": i["key"], "title": i.get("title"), "source": src, "matches": [],
+             **({k: i[k] for k in ("fixed_versions", "affected") if i.get(k)})}
         for kind, label, term, extra, rx, is_noisy in compiled:
             field = "strong" if rx.search(strong) else "text" if rx.search(weak) else None
-            if not field or (field == "text" and (is_noisy or term.lower() == publisher or kind == "ignore")):
+            is_umb = bool(umb) and kind == "stack" and (term.lower() in umb or label.lower() in umb)
+            if not field or (field == "text" and (is_noisy or is_umb or term.lower() == publisher or kind == "ignore")):
                 continue
             if field == "text":
                 weak_hits.setdefault(term, set()).add(i["key"])
             m["matches"].append({"kind": kind, "entry": label, "term": term, "field": field,
-                                 **({"noisy": True} if is_noisy else {}), **extra})
+                                 **({"noisy": True} if is_noisy else {}),
+                                 **({"umbrella": True} if is_umb else {}), **extra})
         hits = [x for x in m["matches"] if x["kind"] in ("stack", "package", "boost")]
-        sure = [x for x in hits if x["field"] == "strong" and not x.get("noisy")]
+        sure = [x for x in hits if x["field"] == "strong" and not x.get("noisy") and not x.get("umbrella")]
         if i["key"] in patched:
             m["verdict"], m["patched"] = "patched", patched[i["key"]]
         elif any(x["kind"] == "ignore" for x in m["matches"]):
             m["verdict"] = "ignored"
         elif sure or (own and hits):
             m["verdict"] = "focus"
-        elif hits or own:
+        elif hits or own or umb:
             m["verdict"] = "maybe"
         else:
             m["verdict"] = "outside"
@@ -1303,7 +1359,7 @@ def collect(a, known):
                         if not warnings:
                             done.add(f"feeds:{name}")
                     except Exception as e:
-                        errors.append({"source": f"feeds:{name}", "error": fetch_error(e, trace)})
+                        errors.append(err_entry(f"feeds:{name}", e, trace=trace))
             elif src == "osv":
                 if not (a.packages or a.osv_file):
                     raise ValueError("osv needs --packages FILE")
@@ -1324,7 +1380,7 @@ def collect(a, known):
                                 items.append(it)
                         done.add(sid)
                     except Exception as e:
-                        errors.append({"source": sid, "error": f"{type(e).__name__}: {e}"})
+                        errors.append(err_entry(sid, e))
             elif src == "nvd":
                 if not a.nvd:
                     raise ValueError("nvd needs --nvd FILE")
@@ -1358,14 +1414,14 @@ def collect(a, known):
                         if not partial:  # a cut-off answer stays pending, see baseline()
                             done.add(sid)
                     except Exception as e:
-                        errors.append({"source": sid, "error": f"{type(e).__name__}: {e}"})
+                        errors.append(err_entry(sid, e))
             else:
                 raise ValueError(f"unknown source {src!r}")
             # osv counts as read once its queries answered: an advisory that failed comes later as new
             if src == "osv" or src not in ("feeds", "ghsa", "nvd") and not any(e["source"] == src for e in errors):
                 done.add(src)
         except Exception as e:  # one source down must not hide the others
-            errors.append({"source": src, "error": f"{type(e).__name__}: {e}"})
+            errors.append(err_entry(src, e))
     if kev_items:
         add_kev_status(items, kev_items)
         # a KEV entry whose CVE is already part of another item is shown inside that item
@@ -1465,7 +1521,7 @@ def do_fetch(a, today):
                 try:
                     full = osv_item(osv_get(a.osv_api, i["key"][4:]), i["packages"])
                 except Exception as e:
-                    errors.append({"source": "osv", "error": f"{i['key']}: {type(e).__name__}: {e}"})
+                    errors.append(err_entry("osv", e, prefix=f"{i['key']}: "))
                     continue
                 full["updates"] += i["updates"]
                 full.update({k: v for k, v in i.items() if k == "kev_cves"})
@@ -1480,10 +1536,13 @@ def do_fetch(a, today):
         try:
             add_epss(result)
         except Exception as e:
-            errors.append({"source": "epss", "error": f"{type(e).__name__}: {e}"})
+            errors.append(err_entry("epss", e))
 
     if a.cve_details and result:
         errors += add_cve_details(result, a.cve_api, a.cve_details_max)
+
+    if a.profile:
+        mark_blocked_errors(errors, load_profile(a.profile))
 
     result.sort(key=lambda i: max([u["date"] for u in i["new_updates"]] or [i["date"]]), reverse=True)
     out = {"generated": today, "tool_version": VERSION, "sources": sources,
@@ -1492,6 +1551,15 @@ def do_fetch(a, today):
     if not a.all:
         save_json(a.snapshot, {"date": today, "items": result, "meta": {k: v for k, v in meta.items() if v}})
     return out
+
+
+def mark_blocked_errors(errors, prof):
+    """Tag errors whose host is in the profile's blocked_hosts with blocked=True; returns unblocked errors"""
+    blocked = {str(h).strip().lower() for h in (prof or {}).get("blocked_hosts") or [] if str(h).strip()}
+    for e in errors:
+        if e.get("host") and e["host"].lower() in blocked:
+            e["blocked"] = True
+    return [e for e in errors if not e.get("blocked")]
 
 
 def reuse_pending(a, today):
@@ -1557,7 +1625,7 @@ def cmd_prefilter(a, today):
     if cands:
         return 10
     cmd_mark(a, today)
-    return 3 if a.strict and out["errors"] else 0
+    return 3 if a.strict and mark_blocked_errors(out["errors"], prof) else 0
 
 
 def main():
@@ -1653,7 +1721,7 @@ def main():
     out = do_fetch(a, today)
     json.dump(out, sys.stdout, ensure_ascii=False, indent=1)
     print()
-    return 3 if a.strict and out["errors"] else 0
+    return 3 if a.strict and [e for e in out["errors"] if not e.get("blocked")] else 0
 
 
 if __name__ == "__main__":

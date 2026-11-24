@@ -2,7 +2,7 @@
 
 This file is a task for an AI assistant: Claude, ChatGPT, Gemini, Codex, Cursor or any other. The user gives the assistant this file and asks it to set up a vulnerability digest. The address of this file is https://vuln-digest.secmy.app/README.md
 
-Version: 1.8.0. The current version and what changed are at https://vuln-digest.secmy.app/version.json
+Version: 1.8.1. The current version and what changed are at https://vuln-digest.secmy.app/version.json
 
 If you are a person, the overview is at https://vuln-digest.secmy.app/ - give the address of this file to your AI assistant and it does the rest
 
@@ -624,7 +624,7 @@ Run them in the foreground with a timeout, for example 10 minutes. Some sandboxe
 | `match --profile FILE` | matches the items of `last_run.json` (or of a saved fetch output given with `--input`) to the profile: names, aliases, the packages file, `ignore`, `boost`, `less` and `patched`. Prints a verdict per item (`focus`, `maybe`, `outside`, `ignored`, `patched`), what matched where, and `warnings` about noisy names. No network |
 | `alert-prefilter --profile FILE --pending FILE` | the urgent-alert run without an agent (R8): fetch, match, keep items in focus with a sign of exploitation. Exit code 0 and the snapshot marked when there are none, 10 and the candidates in the pending file when the agent is needed. Takes the fetch options |
 | `alert-prefilter ... --reuse-if-fresh MINUTES` | for an agent on its own schedule (R8): if the pending file is younger than MINUTES, use it instead of fetching. Exit 0 when there are no candidates or the snapshot is already marked, 10 when candidates wait. An older or missing pending file means a normal run |
-| `--strict` | `fetch` and `alert-prefilter` exit with code 3 when `errors` is not empty, `check-feeds` when a feed has a problem. The output and the snapshot are written all the same |
+| `--strict` | `fetch` and `alert-prefilter` exit with code 3 when `errors` has an unblocked error (hosts in the profile's `blocked_hosts` do not count when `--profile` is given), `check-feeds` when a feed has a problem. The output and the snapshot are written all the same |
 | `--sources zerowire,kev,feeds,osv,ghsa,nvd` | which sources to use |
 | `--feeds FILE` | vendor RSS or Atom feeds, one `name\|url` per line. Each entry is one item |
 | `--packages FILE` | the packages file for OSV |

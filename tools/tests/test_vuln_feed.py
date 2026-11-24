@@ -968,11 +968,42 @@ class VulnFeedTest(unittest.TestCase):
 
     def test_match_warns_about_descriptive_ignore(self):
         self.fetch("--since", "2026-01-01")
-        prof = self.write_profile("stack: [nginx]\nignore: [Android/iOS/ChromeOS-only Chrome releases, PHP]\n")
+        prof = self.write_profile(
+            'stack: [nginx, Ubuntu]\n'
+            'ignore:\n  - Android/iOS/ChromeOS-only Chrome releases\n  - Windows: local privilege escalation\n  - PHP\n'
+            'boost: ["quoted [bracket] # not comment"]\n')
         out = json.loads(self.run_tool("match", "--profile", prof).stdout)
         self.assertTrue(any("'Android/iOS/ChromeOS-only Chrome releases' looks like a description" in w
                             for w in out["warnings"]))
+        self.assertTrue(any("'Windows: local privilege escalation' looks like a description" in w
+                            for w in out["warnings"]))
         self.assertFalse(any("'PHP'" in w for w in out["warnings"]))
+        # Umbrella OS feed (feeds:ubuntu) matching only "Ubuntu" gives maybe; matching nginx too gives focus
+        snap_in = os.path.join(self.dir, "umb.json")
+        write(snap_in, json.dumps({"items": [
+            {"key": "feed:ubuntu:usn-1", "source": "feeds:ubuntu", "title": "USN-1: Thunderbird bug",
+             "summary": "Ubuntu Security Notice", "cves": ["CVE-2026-1"]},
+            {"key": "feed:ubuntu:usn-2", "source": "feeds:ubuntu", "title": "USN-2: nginx bug",
+             "summary": "Ubuntu Security Notice", "cves": ["CVE-2026-2"], "fixed_versions": ["1.24.0-2ubuntu1"]},
+        ]}))
+        out_umb = json.loads(self.run_tool("match", "--profile", prof, "--input", snap_in).stdout)
+        by_k = {m["key"]: m for m in out_umb["items"]}
+        self.assertEqual(by_k["feed:ubuntu:usn-1"]["verdict"], "maybe")
+        self.assertEqual(by_k["feed:ubuntu:usn-2"]["verdict"], "focus")
+        self.assertEqual(by_k["feed:ubuntu:usn-2"]["fixed_versions"], ["1.24.0-2ubuntu1"])
+
+    def test_blocked_hosts_and_error_host(self):
+        feeds = os.path.join(self.dir, "feeds.txt")
+        write(feeds, f"dead|{self.server.url}/missing.xml\n")
+        prof = self.write_profile("stack: [nginx]\nblocked_hosts: [127.0.0.1]\n")
+        # Without blocked_hosts profile, --strict exits 3; with blocked_hosts matching 127.0.0.1, exits 0
+        p1 = self.run_tool("fetch", "--all", "--sources", "feeds", "--feeds", feeds, "--strict", ok=False)
+        self.assertEqual(p1.returncode, 3)
+        err1 = json.loads(p1.stdout)["errors"][0]
+        self.assertEqual(err1["host"], "127.0.0.1")
+        p2 = self.run_tool("fetch", "--all", "--sources", "feeds", "--feeds", feeds, "--profile", prof, "--strict")
+        self.assertEqual(p2.returncode, 0)
+        self.assertTrue(json.loads(p2.stdout)["errors"][0]["blocked"])
 
 if __name__ == "__main__":
     unittest.main()
