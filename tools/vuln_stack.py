@@ -27,7 +27,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.6.1"
+VERSION = "1.7.0"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CATALOG = os.path.join(HERE, "catalog.json")

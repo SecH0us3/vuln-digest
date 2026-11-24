@@ -28,9 +28,11 @@ New sources:
 Usage:
   python3 -I vuln_feed.py fetch [--sources zerowire,kev,feeds,osv,ghsa,nvd] [--packages FILE] [--feeds FILE] [--ghsa FILE] [--nvd FILE] [--epss] [--cve-details]
       print new and updated items as JSON and save them to the snapshot file
-  python3 -I vuln_feed.py mark
+  python3 -I vuln_feed.py mark [--keep-snapshot]
       mark exactly the items of the snapshot as delivered. Does not fetch again.
-      Run it only after the digest was delivered
+      Run it only after the digest was delivered. The state is saved first; then the
+      snapshot is deleted, or kept with "marked" set (--keep-snapshot, or a folder that
+      forbids deleting). A second mark of a marked snapshot does nothing
   python3 -I vuln_feed.py fetch --since YYYY-MM-DD
       no state file yet: treat every update dated before this day as already seen.
       With a state file, it sets the cut-off for sources that are read for the first time
@@ -41,7 +43,18 @@ Usage:
       and for "I patched X" feedback
   python3 -I vuln_feed.py check-feeds --feeds FILE
       read each feed once and say whether it works: its format, entries, newest
-      date and CVE ids. For the setup, before a feed goes into the job
+      date and CVE ids, the hosts it went to and its redirects. For the setup,
+      before a feed goes into the job
+  python3 -I vuln_feed.py match --profile FILE [--input FETCH_OUTPUT]
+      match the snapshot's items to the profile (R3) by names, aliases, packages,
+      ignore and patched: focus, maybe, outside, ignored or patched. No network
+  python3 -I vuln_feed.py alert-prefilter --profile FILE --state S --snapshot N --pending P [fetch options]
+      the urgent-alert job without an agent: fetch, match, keep items in focus with a
+      sign of exploitation. Exit 0: none, the snapshot is marked. Exit 10: candidates
+      are in the pending file, the snapshot is left for the agent to mark
+
+Exit codes: 0 done; 3 with --strict when a source failed (the output is still
+written); 10 from alert-prefilter when the agent is needed
 
 Files (next to this script unless set): state.json, last_run.json
 Offline testing: --zerowire-file, --kev-file, --osv-file read local copies
@@ -62,7 +75,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
-VERSION = "1.6.1"
+VERSION = "1.7.0"
 UA = f"vuln-digest/{VERSION} (+https://vuln-digest.secmy.app/)"
 ZEROWIRE_FEED = "https://radar.cloudflare.com/zero-wire/feed"
 KEV_JSON = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -107,9 +120,15 @@ def same_origin(a, b):
 
 
 class SafeRedirect(urllib.request.HTTPRedirectHandler):
-    """A redirect is followed only to http or https, and never carries tokens to another origin"""
+    """A redirect is followed only to http or https, and never carries tokens to another origin.
+    With a trace list, every address it goes to is appended, so an error can name the host that failed"""
+    def __init__(self, trace=None):
+        self.trace = trace
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         web_url(newurl)
+        if self.trace is not None:
+            self.trace.append(newurl)
         new = super().redirect_request(req, fp, code, msg, headers, newurl)
         if new is not None and (not same_origin(req.full_url, newurl) or not token_ok(newurl)):
             for h in [k for k in new.headers if k.lower() in ("authorization", "apikey")]:
@@ -121,14 +140,15 @@ OPENER = urllib.request.build_opener(SafeRedirect)
 
 
 # S310: Request gets only URLs that web_url() checked
-def http_get(url, timeout=60, data=None, extra_headers=None):
+def http_get(url, timeout=60, data=None, extra_headers=None, trace=None):
     headers = {"User-Agent": UA}
     if extra_headers:
         headers.update(extra_headers)
     if data is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(web_url(url), data=data, headers=headers)  # noqa: S310
-    with OPENER.open(req, timeout=timeout) as r:
+    opener = OPENER if trace is None else urllib.request.build_opener(SafeRedirect(trace))
+    with opener.open(req, timeout=timeout) as r:
         body = r.read(MAX_BYTES + 1)
     if len(body) > MAX_BYTES:
         raise ValueError(f"response larger than {MAX_BYTES} bytes: {url}")
@@ -307,13 +327,33 @@ def parse_vendor_feed(name, raw, warnings=None):
     return items
 
 
+def fetch_error(e, trace):
+    """An error message that names the address that failed, after the redirects that led to it.
+    Behind an egress allow list, that is the host to allow"""
+    msg = f"{type(e).__name__}: {e}"  # an HTTP error names its status
+    if len(trace) > 1:
+        msg += (f" (redirected: {' -> '.join(trace)}; the failed request went to "
+                f"{urllib.parse.urlsplit(trace[-1]).hostname})")
+    return msg
+
+
 def check_feed(name, url):
-    """One line of check-feeds. "problems" lists what makes the feed useless for a digest"""
+    """One line of check-feeds. "problems" lists what makes the feed useless for a digest.
+    "hosts" lists every host the request went to, "redirects" the addresses after the first"""
     row = {"name": name, "url": url, "ok": False, "problems": []}
+    trace = [url]
     try:
-        raw = http_get(url)
+        raw = http_get(url, trace=trace)
     except Exception as e:
-        row["problems"].append(f"{type(e).__name__}: {e}")  # an HTTP error names its status
+        row["problems"].append(fetch_error(e, trace))
+        raw = None
+    row["hosts"] = list(dict.fromkeys(urllib.parse.urlsplit(u).hostname for u in trace))
+    if len(trace) > 1:
+        row["redirects"] = trace[1:]
+        if raw is not None:
+            row["final_url"] = trace[-1]
+            row["note"] = "the feed moved: put final_url into the feeds file"
+    if raw is None:
         return row
     head = raw[:500].decode("utf-8", "replace").lstrip().lower()
     if head.startswith(("<!doctype html", "<html")):
@@ -931,6 +971,294 @@ def mark(state, items, today, only_before=None):
     return state
 
 
+# ---------- profile and matching (R3) ----------
+
+def strip_comment(line):
+    """Drop a # comment that starts the line or follows a space, outside quotes"""
+    q = None
+    for n, c in enumerate(line):
+        if q:
+            q = None if c == q else q
+        elif c in "\"'":
+            q = c
+        elif c == "#" and (n == 0 or line[n - 1] in " \t"):
+            return line[:n].rstrip()
+    return line.rstrip()
+
+
+def yaml_scalar(s):
+    s = s.strip()
+    if s[:1] == '"':
+        return json.loads(s)
+    if s[:1] == "'":
+        return s[1:-1].replace("''", "'")
+    low = s.lower()
+    if low in ("", "null", "~"):
+        return None
+    if low in ("true", "false"):
+        return low == "true"
+    if re.fullmatch(r"-?\d+", s):
+        return int(s)
+    return s
+
+
+def yaml_flow(s, i=0, ctx=""):
+    """One value of a flow collection, such as [a, b] or { name: x, aliases: [y] }. Returns (value, end)"""
+    while i < len(s) and s[i] == " ":
+        i += 1
+    if i < len(s) and s[i] in "[{":
+        close, out = ("]", []) if s[i] == "[" else ("}", {})
+        i += 1
+        while True:
+            while i < len(s) and s[i] in " ,":
+                i += 1
+            if i >= len(s):
+                raise ValueError(f"unclosed {s[0]!r}")
+            if s[i] == close:
+                return out, i + 1
+            if close == "]":
+                v, i = yaml_flow(s, i, ",]")
+                out.append(v)
+            else:
+                m = re.compile(r"\s*(\"[^\"]*\"|'[^']*'|[^:,{}\[\]]+?)\s*:(?=[\s,}\[{])").match(s, i)
+                if not m:
+                    raise ValueError(f"no key at {s[i:i + 20]!r}")
+                v, i = yaml_flow(s, m.end(), ",}")
+                out[yaml_scalar(m.group(1))] = v
+    if i < len(s) and s[i] in "\"'":
+        m = re.compile(r'"(?:[^"\\]|\\.)*"' if s[i] == '"' else r"'(?:[^']|'')*'").match(s, i)
+        if not m:
+            raise ValueError("unclosed quote")
+        return yaml_scalar(m.group(0)), m.end()
+    j = i
+    while j < len(s) and s[j] not in ctx:
+        j += 1
+    return yaml_scalar(s[i:j]), j
+
+
+def yaml_lines(text):
+    """(line number, indent, text) without comments and blank lines. A flow collection that spans
+    several lines is joined into one"""
+    out, buf = [], None
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = strip_comment(raw.replace("\t", "    "))
+        if not line.strip():
+            continue
+        if buf:
+            buf[2] += " " + line.strip()
+        else:
+            buf = [n, len(line) - len(line.lstrip()), line.strip()]
+        if re.match(r"[|>][-+]?$|[&*!]", re.sub(r"^(- )?[^:]*:\s*", "", buf[2]) or "-"):
+            raise ValueError(f"line {n}: block scalars, anchors and tags are not supported")
+        depth = sum(buf[2].count(c) for c in "[{") - sum(buf[2].count(c) for c in "]}")
+        if depth <= 0:
+            out.append(buf)
+            buf = None
+    if buf:
+        raise ValueError(f"line {buf[0]}: unclosed bracket")
+    return out
+
+
+KEY_RE = re.compile(r"(\"[^\"]*\"|'[^']*'|[^\s\"'\[\]{}#&*!|>%@`][^:]*?)\s*:(?:\s+(.*))?$")
+
+
+def yaml_block(lines, k, indent):
+    """The block that starts at lines[k] with this indent: a list or a mapping. Returns (value, next k)"""
+    if lines[k][2] == "-" or lines[k][2].startswith("- "):
+        out = []
+        while k < len(lines) and lines[k][1] == indent and (lines[k][2] == "-" or lines[k][2].startswith("- ")):
+            n, _, text = lines[k]
+            rest = text[1:].strip()
+            if not rest:
+                if k + 1 < len(lines) and lines[k + 1][1] > indent:
+                    v, k = yaml_block(lines, k + 1, lines[k + 1][1])
+                else:
+                    v, k = None, k + 1
+            elif rest[0] not in "[{\"'" and KEY_RE.match(rest):  # "- name: x" starts a mapping
+                lines[k] = [n, indent + 2, rest]
+                v, k = yaml_block(lines, k, indent + 2)
+            else:
+                v, end = yaml_flow(rest)
+                if rest[end:].strip():
+                    raise ValueError(f"line {n}: unexpected {rest[end:].strip()!r}")
+                k += 1
+            out.append(v)
+        return out, k
+    out = {}
+    while k < len(lines) and lines[k][1] == indent:
+        n, _, text = lines[k]
+        m = KEY_RE.match(text)
+        if not m or text.startswith("- "):
+            raise ValueError(f"line {n}: expected 'key: value', got {text!r}")
+        key, rest = yaml_scalar(m.group(1)), (m.group(2) or "").strip()
+        k += 1
+        if rest:
+            v, end = yaml_flow(rest)
+            if rest[end:].strip():
+                raise ValueError(f"line {n}: unexpected {rest[end:].strip()!r}")
+        elif k < len(lines) and (lines[k][1] > indent or lines[k][1] == indent and lines[k][2].startswith("-")):
+            v, k = yaml_block(lines, k, lines[k][1])
+        else:
+            v = None
+        out[key] = v
+    if k < len(lines) and lines[k][1] > indent:
+        raise ValueError(f"line {lines[k][0]}: unexpected indent")
+    return out, k
+
+
+def load_profile(path):
+    """The profile as JSON, or as the simple YAML of the example in README.md: key: value lines,
+    lists with "- ", and one-line [..] and {..}. No PyYAML needed"""
+    with open(path) as f:
+        text = f.read()
+    try:
+        if path.endswith(".json") or text.lstrip().startswith("{"):
+            prof = json.loads(text)
+        else:
+            lines = yaml_lines(text)
+            prof, k = yaml_block(lines, 0, lines[0][1]) if lines else ({}, 0)
+            if k < len(lines):
+                raise ValueError(f"line {lines[k][0]}: unexpected indent")
+    except ValueError as e:
+        raise SystemExit(f"{path}: cannot read the profile: {e}. Write it as JSON, or as simple YAML "
+                         "(key: value, '- ' lists, one-line [..] and {..})")
+    if not isinstance(prof, dict):
+        raise SystemExit(f"{path}: the profile must be a mapping")
+    return prof
+
+
+# A term this short, or a common word, matches ordinary text: "next", "sharp", "express"
+COMMON_WORDS = set("""next sharp express request react node core debug link path event glob form proxy cookie
+send mime once color commander async util log time date string buffer stream url query auth cache config common
+client server shell agent socket ws yaml json http sql base app api web cli kit view chart test""".split())
+# the publisher of a source names itself in nearly every entry
+PUBLISHERS = {"zerowire": "cloudflare", "kev": "cisa", "ghsa": "github", "nvd": "nvd"}
+SIGNAL_RE = re.compile(r"exploit|in the wild|proof[- ]of[- ]concept|\bpoc\b|ransomware|weaponi[sz]|zero[- ]day|0-day", re.I)
+
+
+def short_acronym(term):
+    """GKE, K8s, V8, .NET: short, but with a capital or a digit. Matched with its case, so it is not noise"""
+    t = term.strip()
+    return len(re.sub(r"\W", "", t)) < 4 and t != t.lower()
+
+
+def noisy(term):
+    t = term.lower().strip()
+    return t in COMMON_WORDS or (len(re.sub(r"\W", "", t)) < 4 and not short_acronym(term))
+
+
+def term_re(term):
+    return re.compile(r"(?<!\w)" + re.escape(term.strip()) + r"(?!\w)", 0 if short_acronym(term) else re.I)
+
+
+def profile_terms(prof, base):
+    """(kind, label, term, extra) for every name and alias of the stack, every package of the packages
+    file, and every entry of ignore, boost and less"""
+    out = []
+    for e in prof.get("stack") or []:
+        e = e if isinstance(e, dict) else {"name": e}
+        name = str(e.get("name") or "").strip()
+        for t in [name, *(e.get("aliases") or [])]:
+            if str(t or "").strip():
+                out.append(("stack", name, str(t).strip(), {"exposed": bool(e.get("exposed"))}))
+    pf = prof.get("packages_file")
+    if pf:
+        path = pf if os.path.isabs(pf) else os.path.join(base, pf)
+        if os.path.exists(path):
+            for p in read_packages(path):
+                out.append(("package", f"{p['ecosystem']}|{p['name']}", p["name"], {"version": p.get("version", "")}))
+    for kind in ("ignore", "boost", "less"):
+        for t in prof.get(kind) or []:
+            if isinstance(t, str) and t.strip():
+                out.append((kind, t.strip(), t.strip(), {}))
+    return out
+
+
+def item_fields(i):
+    """strong: fields that name what is affected. weak: the long text, where a name is often only context"""
+    src = i.get("source", "")
+    names = [i.get("title"), i.get("summary"), i.get("product"), i.get("vendor"), *(i.get("products") or [])]
+    if src.startswith(("feeds:", "nvd:", "ghsa:")):  # the feed, product or repository the user listed
+        names.append(src.split(":", 1)[1])
+    for p in (i.get("packages") or []) + ([i["package"]] if isinstance(i.get("package"), dict) else []):
+        names.append(p.get("name"))
+    strong = "\n".join(str(x) for x in names if x)
+    weak = "\n".join([i.get("text") or ""] + [u.get("text", "") for u in i.get("new_updates") or i.get("updates") or []])
+    return strong, weak
+
+
+def active_patched(prof, today):
+    out = {}
+    for p in prof.get("patched") or []:
+        if isinstance(p, dict) and p.get("item") and (not p.get("until") or str(p["until"]) > today):
+            out[p["item"]] = p
+    return out
+
+
+def match_items(items, prof, base, today):
+    """R3 without judgement: which items name a product, alias or package of the profile, and where.
+    verdict: focus (a name in the title, summary, product or package), maybe (only a short or common
+    word, or only the long text), outside, ignored (an ignore entry in title or summary), patched.
+    The agent still decides: by meaning, versions, and ignore entries that describe a kind of bug"""
+    terms = profile_terms(prof, base)
+    patched = active_patched(prof, today)
+    compiled = [(kind, label, term, extra, term_re(term), noisy(term)) for kind, label, term, extra in terms]
+    out, weak_hits = [], {}
+    for i in items:
+        strong, weak = item_fields(i)
+        publisher = PUBLISHERS.get(i.get("source", "").split(":")[0])
+        own = i.get("source", "").split(":")[0] in ("osv", "ghsa", "nvd") or i.get("source", "").startswith("feeds:")
+        m = {"key": i["key"], "title": i.get("title"), "source": i.get("source"), "matches": []}
+        for kind, label, term, extra, rx, is_noisy in compiled:
+            field = "strong" if rx.search(strong) else "text" if rx.search(weak) else None
+            if not field or (field == "text" and (is_noisy or term.lower() == publisher or kind == "ignore")):
+                continue
+            if field == "text":
+                weak_hits.setdefault(term, set()).add(i["key"])
+            m["matches"].append({"kind": kind, "entry": label, "term": term, "field": field,
+                                 **({"noisy": True} if is_noisy else {}), **extra})
+        hits = [x for x in m["matches"] if x["kind"] in ("stack", "package", "boost")]
+        sure = [x for x in hits if x["field"] == "strong" and not x.get("noisy")]
+        if i["key"] in patched:
+            m["verdict"], m["patched"] = "patched", patched[i["key"]]
+        elif any(x["kind"] == "ignore" for x in m["matches"]):
+            m["verdict"] = "ignored"
+        elif sure or (own and hits):
+            m["verdict"] = "focus"
+        elif hits or own:
+            m["verdict"] = "maybe"
+        else:
+            m["verdict"] = "outside"
+        if any(x["kind"] == "less" for x in m["matches"]):
+            m["less"] = True
+        if any(x.get("exposed") for x in hits):
+            m["exposed"] = True
+        out.append(m)
+    warnings = []
+    for kind, label, term, extra, rx, is_noisy in compiled:
+        if is_noisy and kind in ("stack", "package"):
+            warnings.append(f"{term!r} ({label}) is short or a common word: it is matched only in titles, "
+                            "summaries, products and package names, and alone gives 'maybe', not 'focus'")
+        if kind in ("stack", "package") and term.lower() in PUBLISHERS.values():
+            src = [k for k, v in PUBLISHERS.items() if v == term.lower()][0]
+            warnings.append(f"{term!r} publishes the {src} source and is named in nearly all of its entries: "
+                            f"its matches in the text of {src} items are ignored")
+    for term, keys in weak_hits.items():
+        if len(keys) >= 4 and len(keys) * 2 >= len(items):
+            warnings.append(f"{term!r} is found in the text of {len(keys)} of {len(items)} items: "
+                            "a text-only match gives 'maybe'. Check that it is not just context")
+    return out, warnings
+
+
+def is_signal(i):
+    """Exploited, or a public exploit: what an urgent alert needs (R4). Broad on purpose"""
+    if i.get("kev_cves") or i.get("source") == "kev":
+        return True
+    text = " ".join([i.get("title") or "", i.get("summary") or "", i.get("text") or ""]
+                    + [u.get("text", "") for u in i.get("new_updates") or []])
+    return bool(SIGNAL_RE.search(text))
+
+
 # ---------- main ----------
 
 def collect(a, known):
@@ -952,14 +1280,15 @@ def collect(a, known):
                 if not a.feeds:
                     raise ValueError("feeds needs --feeds FILE")
                 for name, url in read_feeds(a.feeds):
+                    trace = [url]
                     try:
                         warnings = []
-                        items += parse_vendor_feed(name, http_get(url), warnings)
+                        items += parse_vendor_feed(name, http_get(url, trace=trace), warnings)
                         errors += [{"source": f"feeds:{name}", "error": w, "partial": True} for w in warnings]
                         if not warnings:
                             done.add(f"feeds:{name}")
                     except Exception as e:
-                        errors.append({"source": f"feeds:{name}", "error": f"{type(e).__name__}: {e}"})
+                        errors.append({"source": f"feeds:{name}", "error": fetch_error(e, trace)})
             elif src == "osv":
                 if not (a.packages or a.osv_file):
                     raise ValueError("osv needs --packages FILE")
@@ -1049,77 +1378,41 @@ def link_same_cves(result, state_items):
             i["cves_delivered_in"] = earlier
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["fetch", "mark", "history", "check-feeds"])
-    ap.add_argument("--days", type=int, default=28, help="history: items shown in the last N days (default 28)")
-    ap.add_argument("--sources", default="zerowire,kev")
-    ap.add_argument("--packages", help="file with ecosystem|name|version lines for OSV")
-    ap.add_argument("--feeds", help="file with name|url lines: vendor RSS or Atom feeds for the feeds source")
-    ap.add_argument("--ghsa", help="file with owner/repo or package|ecosystem|name lines for GHSA")
-    ap.add_argument("--nvd", help="file with name|cpe:2.3:... lines for NVD")
-    ap.add_argument("--nvd-days", type=int, default=30, help="NVD publication window in days (1-119, default 30)")
-    ap.add_argument("--epss", action="store_true", help="add EPSS scores to the result")
-    ap.add_argument("--cve-details", action="store_true", help="enrich items missing CVSS/versions via CVE.org")
-    ap.add_argument("--cve-details-max", type=int, default=30, help="max CVEs to enrich via CVE.org per run (default 30)")
-    ap.add_argument("--kev-max-age", type=int, default=30,
-                    help="show KEV entries added in the last N days only (default 30)")
-    ap.add_argument("--since", metavar="YYYY-MM-DD",
-                    help="first run without state: updates before this day count as seen. "
-                         "With a state: the same, for sources read for the first time")
-    ap.add_argument("--all", action="store_true", help="preview everything, state is not used")
-    ap.add_argument("--state", default=os.path.join(HERE, "state.json"))
-    ap.add_argument("--snapshot", default=os.path.join(HERE, "last_run.json"))
-    ap.add_argument("--zerowire-file")
-    ap.add_argument("--kev-file")
-    ap.add_argument("--osv-file")
-    ap.add_argument("--osv-api", default=OSV_API, help=argparse.SUPPRESS)
-    ap.add_argument("--ghsa-api", default=GHSA_API, help=argparse.SUPPRESS)
-    ap.add_argument("--nvd-api", default=NVD_API, help=argparse.SUPPRESS)
-    ap.add_argument("--nvd-delay", type=float, default=None, help=argparse.SUPPRESS)
-    ap.add_argument("--cve-api", default=CVE_ORG_API, help=argparse.SUPPRESS)
-    ap.add_argument("--today", default=datetime.date.today().isoformat(), help=argparse.SUPPRESS)
-    a = ap.parse_args()
-    today = a.today
-
-    if a.command == "mark":
-        st = load_state(a.state) or {"version": STATE_VERSION, "items": {}, "sources": {}}
+def cmd_mark(a, today):
+    """Mark the snapshot as delivered. The state is saved first. Then the snapshot is deleted, or, with
+    --keep-snapshot or in a folder that forbids deleting, rewritten with "marked": a second mark of the
+    same snapshot changes nothing"""
+    st = load_state(a.state) or {"version": STATE_VERSION, "items": {}, "sources": {}}
+    try:
+        with open(a.snapshot) as f:
+            snap = json.load(f)
+    except FileNotFoundError:
+        raise SystemExit("no snapshot: run fetch first, deliver the digest, then mark")
+    if snap.get("marked"):
+        print(f"{a.snapshot} was already marked on {snap['marked']}: nothing to do", file=sys.stderr)
+        return
+    for i in snap["items"]:  # mark only the updates that were shown
+        i["updates"] = i["new_updates"]
+    mark(st, snap["items"], today)
+    for k, meta in snap.get("meta", {}).items():  # what fetch learned about items it did not show
+        if k in st["items"]:
+            st["items"][k].update(meta)
+    st["last_digest"] = snap["date"]
+    save_json(a.state, st)
+    print(f"marked {len(snap['items'])} item(s) as delivered, state saved", file=sys.stderr)
+    if not a.keep_snapshot:
         try:
-            with open(a.snapshot) as f:
-                snap = json.load(f)
-        except FileNotFoundError:
-            raise SystemExit("no snapshot: run fetch first, deliver the digest, then mark")
-        for i in snap["items"]:  # mark only the updates that were shown
-            i["updates"] = i["new_updates"]
-        mark(st, snap["items"], today)
-        for k, meta in snap.get("meta", {}).items():  # what fetch learned about items it did not show
-            if k in st["items"]:
-                st["items"][k].update(meta)
-        st["last_digest"] = snap["date"]
-        save_json(a.state, st)
-        os.remove(a.snapshot)
-        print(f"marked {len(snap['items'])} item(s) as delivered", file=sys.stderr)
-        return
+            os.remove(a.snapshot)
+            return
+        except OSError as e:
+            print(f"cannot delete {a.snapshot} ({e}): kept it with \"marked\" set instead", file=sys.stderr)
+    snap["marked"] = today
+    with open(a.snapshot, "w") as f:  # rewritten in place: a folder that forbids deleting may forbid replacing
+        json.dump(snap, f, ensure_ascii=False, indent=1)
 
-    if a.command == "check-feeds":
-        if not a.feeds:
-            raise SystemExit("check-feeds needs --feeds FILE")
-        json.dump([check_feed(n, u) for n, u in read_feeds(a.feeds)], sys.stdout, ensure_ascii=False, indent=1)
-        print()
-        return
 
-    if a.command == "history":
-        st = load_state(a.state)
-        if st is None:
-            raise SystemExit("state.json not found")
-        cutoff = (datetime.date.fromisoformat(today) - datetime.timedelta(days=a.days)).isoformat()
-        rows = [dict(key=k, **{f: v.get(f) for f in ("title", "link", "cves", "first_seen", "last_shown", "last_update")})
-                for k, v in st["items"].items() if (v.get("last_shown") or "") >= cutoff]
-        rows.sort(key=lambda r: r["last_shown"], reverse=True)
-        json.dump(rows, sys.stdout, ensure_ascii=False, indent=1)
-        print()
-        return
-
+def do_fetch(a, today):
+    """The fetch command without printing: returns its output"""
     st = None if a.all else load_state(a.state)
     if st is None and not a.all and not a.since:
         raise SystemExit("state.json not found. Restore it from durable storage, or run again with "
@@ -1182,9 +1475,130 @@ def main():
            "errors": errors, "items": result}
     if not a.all:
         save_json(a.snapshot, {"date": today, "items": result, "meta": {k: v for k, v in meta.items() if v}})
+    return out
+
+
+def cmd_prefilter(a, today):
+    """The deterministic part of an urgent-alert run (R8): fetch with the alert job's state, match the
+    items to the profile, keep the ones in focus (or maybe) with a sign of exploitation. None: mark the
+    snapshot and return 0, no agent needed. Some: write them to --pending, leave the snapshot unmarked
+    and return 10, so the scheduler starts the agent. The pending file is rewritten on every run, so its
+    "checked" time is also a heartbeat"""
+    prof = load_profile(a.profile)
+    now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+    pending = {"checked": now, "date": today, "tool_version": VERSION, "state": a.state, "snapshot": a.snapshot,
+               "candidates": [], "errors": [], "warnings": []}
+    paused = prof.get("paused_until")
+    if paused and today < str(paused) and prof.get("pause_alerts"):
+        pending["paused_until"] = str(paused)
+        save_json(a.pending, pending)
+        print(json.dumps({"paused_until": str(paused), "candidates": 0}))
+        return 0
+    out = do_fetch(a, today)
+    matches, warnings = match_items(out["items"], prof, os.path.dirname(os.path.abspath(a.profile)), today)
+    by_key = {m["key"]: m for m in matches}
+    cands = [dict(i, match=by_key[i["key"]]) for i in out["items"]
+             if by_key[i["key"]]["verdict"] in ("focus", "maybe") and is_signal(i)]
+    pending.update(candidates=cands, errors=out["errors"], warnings=warnings, items_checked=len(out["items"]))
+    save_json(a.pending, pending)
+    print(json.dumps({"checked": now, "items": len(out["items"]), "candidates": len(cands),
+                      "errors": len(out["errors"]), "pending": a.pending}))
+    if cands:
+        return 10
+    cmd_mark(a, today)
+    return 3 if a.strict and out["errors"] else 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("command", choices=["fetch", "mark", "history", "check-feeds", "match", "alert-prefilter"])
+    ap.add_argument("--days", type=int, default=28, help="history: items shown in the last N days (default 28)")
+    ap.add_argument("--sources", default="zerowire,kev")
+    ap.add_argument("--packages", help="file with ecosystem|name|version lines for OSV")
+    ap.add_argument("--feeds", help="file with name|url lines: vendor RSS or Atom feeds for the feeds source")
+    ap.add_argument("--ghsa", help="file with owner/repo or package|ecosystem|name lines for GHSA")
+    ap.add_argument("--nvd", help="file with name|cpe:2.3:... lines for NVD")
+    ap.add_argument("--nvd-days", type=int, default=30, help="NVD publication window in days (1-119, default 30)")
+    ap.add_argument("--epss", action="store_true", help="add EPSS scores to the result")
+    ap.add_argument("--cve-details", action="store_true", help="enrich items missing CVSS/versions via CVE.org")
+    ap.add_argument("--cve-details-max", type=int, default=30, help="max CVEs to enrich via CVE.org per run (default 30)")
+    ap.add_argument("--kev-max-age", type=int, default=30,
+                    help="show KEV entries added in the last N days only (default 30)")
+    ap.add_argument("--since", metavar="YYYY-MM-DD",
+                    help="first run without state: updates before this day count as seen. "
+                         "With a state: the same, for sources read for the first time")
+    ap.add_argument("--all", action="store_true", help="preview everything, state is not used")
+    ap.add_argument("--strict", action="store_true", help="exit with code 3 when a source failed (errors is not empty)")
+    ap.add_argument("--keep-snapshot", action="store_true",
+                    help="mark: keep the snapshot file, marked as done, instead of deleting it")
+    ap.add_argument("--profile", help="match, alert-prefilter: the profile, as JSON or simple YAML")
+    ap.add_argument("--input", help="match: a fetch output to match instead of the snapshot")
+    ap.add_argument("--state", default=os.path.join(HERE, "state.json"))
+    ap.add_argument("--snapshot", default=os.path.join(HERE, "last_run.json"))
+    ap.add_argument("--pending", default=os.path.join(HERE, "alerts-pending.json"),
+                    help="alert-prefilter: where to write the candidates for the agent")
+    ap.add_argument("--zerowire-file")
+    ap.add_argument("--kev-file")
+    ap.add_argument("--osv-file")
+    ap.add_argument("--osv-api", default=OSV_API, help=argparse.SUPPRESS)
+    ap.add_argument("--ghsa-api", default=GHSA_API, help=argparse.SUPPRESS)
+    ap.add_argument("--nvd-api", default=NVD_API, help=argparse.SUPPRESS)
+    ap.add_argument("--nvd-delay", type=float, default=None, help=argparse.SUPPRESS)
+    ap.add_argument("--cve-api", default=CVE_ORG_API, help=argparse.SUPPRESS)
+    ap.add_argument("--today", default=datetime.date.today().isoformat(), help=argparse.SUPPRESS)
+    a = ap.parse_args()
+    today = a.today
+    if a.command in ("match", "alert-prefilter") and not a.profile:
+        raise SystemExit(f"{a.command} needs --profile FILE")
+
+    if a.command == "mark":
+        cmd_mark(a, today)
+        return 0
+
+    if a.command == "alert-prefilter":
+        return cmd_prefilter(a, today)
+
+    if a.command == "match":
+        path = a.input or a.snapshot
+        try:
+            with open(path) as f:
+                items = json.load(f)["items"]
+        except FileNotFoundError:
+            raise SystemExit(f"{path} not found: run fetch first")
+        matches, warnings = match_items(items, load_profile(a.profile),
+                                        os.path.dirname(os.path.abspath(a.profile)), today)
+        counts = {}
+        for m in matches:
+            counts[m["verdict"]] = counts.get(m["verdict"], 0) + 1
+        json.dump({"counts": counts, "warnings": warnings, "items": matches}, sys.stdout, ensure_ascii=False, indent=1)
+        print()
+        return 0
+
+    if a.command == "check-feeds":
+        if not a.feeds:
+            raise SystemExit("check-feeds needs --feeds FILE")
+        rows = [check_feed(n, u) for n, u in read_feeds(a.feeds)]
+        json.dump(rows, sys.stdout, ensure_ascii=False, indent=1)
+        print()
+        return 3 if a.strict and not all(r["ok"] for r in rows) else 0
+
+    if a.command == "history":
+        st = load_state(a.state)
+        if st is None:
+            raise SystemExit("state.json not found")
+        cutoff = (datetime.date.fromisoformat(today) - datetime.timedelta(days=a.days)).isoformat()
+        rows = [dict(key=k, **{f: v.get(f) for f in ("title", "link", "cves", "first_seen", "last_shown", "last_update")})
+                for k, v in st["items"].items() if (v.get("last_shown") or "") >= cutoff]
+        rows.sort(key=lambda r: r["last_shown"], reverse=True)
+        json.dump(rows, sys.stdout, ensure_ascii=False, indent=1)
+        print()
+        return 0
+
+    out = do_fetch(a, today)
     json.dump(out, sys.stdout, ensure_ascii=False, indent=1)
     print()
+    return 3 if a.strict and out["errors"] else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
